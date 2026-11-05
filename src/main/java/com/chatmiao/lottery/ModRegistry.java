@@ -59,7 +59,8 @@ public final class ModRegistry {
     public static final DeferredBlock<ScratchTableBlock> SCRATCH_TABLE =
             BLOCKS.register("scratch_table", () -> new ScratchTableBlock(stationProps(MapColor.COLOR_GREEN)));
     public static final DeferredBlock<RedeemStationBlock> REDEEM_STATION =
-            BLOCKS.register("redeem_station", () -> new RedeemStationBlock(stationProps(MapColor.COLOR_RED)));
+            BLOCKS.register("redeem_station", () -> new RedeemStationBlock(stationProps(MapColor.COLOR_RED).noOcclusion()
+                    .lightLevel(s -> s.getValue(RedeemStationBlock.HALF) == net.minecraft.world.level.block.state.properties.DoubleBlockHalf.UPPER ? 7 : 0)));
 
     public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<ScratchTableBlockEntity>> SCRATCH_TABLE_BE =
             BLOCK_ENTITIES.register("scratch_table", () ->
@@ -75,7 +76,7 @@ public final class ModRegistry {
     public static final DeferredItem<OpBlockItem> SCRATCH_TABLE_ITEM = ITEMS.register("scratch_table",
             () -> new OpBlockItem(SCRATCH_TABLE.get(), new Item.Properties()));
     public static final DeferredItem<OpBlockItem> REDEEM_STATION_ITEM = ITEMS.register("redeem_station",
-            () -> new OpBlockItem(REDEEM_STATION.get(), new Item.Properties()));
+            () -> new OpBlockItem(REDEEM_STATION.get(), new Item.Properties().stacksTo(16)));
 
     // ---- creative tab (only shows items to operators with "operator items" enabled) ----
     public static final DeferredHolder<CreativeModeTab, CreativeModeTab> TAB = TABS.register("main", () ->

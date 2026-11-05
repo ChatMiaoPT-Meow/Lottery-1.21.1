@@ -1,5 +1,34 @@
 {
   "variants": {
-    "": { "model": "lottery:block/redeem_station" }
+    "facing=north,half=lower": {
+      "model": "lottery:block/redeem_station_lower"
+    },
+    "facing=north,half=upper": {
+      "model": "lottery:block/redeem_station_upper"
+    },
+    "facing=east,half=lower": {
+      "model": "lottery:block/redeem_station_lower",
+      "y": 90
+    },
+    "facing=east,half=upper": {
+      "model": "lottery:block/redeem_station_upper",
+      "y": 90
+    },
+    "facing=south,half=lower": {
+      "model": "lottery:block/redeem_station_lower",
+      "y": 180
+    },
+    "facing=south,half=upper": {
+      "model": "lottery:block/redeem_station_upper",
+      "y": 180
+    },
+    "facing=west,half=lower": {
+      "model": "lottery:block/redeem_station_lower",
+      "y": 270
+    },
+    "facing=west,half=upper": {
+      "model": "lottery:block/redeem_station_upper",
+      "y": 270
+    }
   }
 }

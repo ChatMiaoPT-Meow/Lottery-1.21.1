@@ -1,0 +1,341 @@
+{
+  "parent": "minecraft:block/block",
+  "ambientocclusion": false,
+  "textures": {
+    "particle": "lottery:block/redeem_station_body",
+    "body": "lottery:block/redeem_station_body",
+    "base": "lottery:block/redeem_station_base",
+    "trim": "lottery:block/redeem_station_trim",
+    "front_lower": "lottery:block/redeem_station_front_lower",
+    "front_upper": "lottery:block/redeem_station_front_upper",
+    "screen": "lottery:block/redeem_station_screen",
+    "slot": "lottery:block/redeem_station_slot",
+    "sign": "lottery:block/redeem_station_sign"
+  },
+  "elements": [
+    {
+      "__comment": "base plinth",
+      "from": [
+        0,
+        0,
+        8
+      ],
+      "to": [
+        16,
+        2,
+        16
+      ],
+      "faces": {
+        "north": {
+          "texture": "#base",
+          "uv": [
+            0,
+            14,
+            16,
+            16
+          ]
+        },
+        "south": {
+          "texture": "#base",
+          "uv": [
+            0,
+            14,
+            16,
+            16
+          ],
+          "cullface": "south"
+        },
+        "east": {
+          "texture": "#base",
+          "uv": [
+            8,
+            14,
+            16,
+            16
+          ],
+          "cullface": "east"
+        },
+        "west": {
+          "texture": "#base",
+          "uv": [
+            0,
+            14,
+            8,
+            16
+          ],
+          "cullface": "west"
+        },
+        "up": {
+          "texture": "#base",
+          "uv": [
+            0,
+            0,
+            16,
+            8
+          ]
+        },
+        "down": {
+          "texture": "#base",
+          "uv": [
+            0,
+            8,
+            16,
+            16
+          ],
+          "cullface": "down"
+        }
+      }
+    },
+    {
+      "__comment": "body",
+      "from": [
+        1,
+        2,
+        9
+      ],
+      "to": [
+        15,
+        16,
+        16
+      ],
+      "faces": {
+        "north": {
+          "texture": "#front_lower",
+          "uv": [
+            1,
+            0,
+            15,
+            14
+          ]
+        },
+        "south": {
+          "texture": "#body",
+          "uv": [
+            1,
+            0,
+            15,
+            14
+          ],
+          "cullface": "south"
+        }
+      }
+    },
+    {
+      "__comment": "trim left",
+      "from": [
+        0,
+        2,
+        8
+      ],
+      "to": [
+        1,
+        16,
+        16
+      ],
+      "faces": {
+        "north": {
+          "texture": "#trim",
+          "uv": [
+            0,
+            0,
+            1,
+            14
+          ]
+        },
+        "south": {
+          "texture": "#body",
+          "uv": [
+            0,
+            0,
+            1,
+            14
+          ],
+          "cullface": "south"
+        },
+        "west": {
+          "texture": "#body",
+          "uv": [
+            8,
+            0,
+            16,
+            14
+          ],
+          "cullface": "west"
+        },
+        "east": {
+          "texture": "#body",
+          "uv": [
+            8,
+            0,
+            9,
+            14
+          ]
+        }
+      }
+    },
+    {
+      "__comment": "trim right",
+      "from": [
+        15,
+        2,
+        8
+      ],
+      "to": [
+        16,
+        16,
+        16
+      ],
+      "faces": {
+        "north": {
+          "texture": "#trim",
+          "uv": [
+            15,
+            0,
+            16,
+            14
+          ]
+        },
+        "south": {
+          "texture": "#body",
+          "uv": [
+            15,
+            0,
+            16,
+            14
+          ],
+          "cullface": "south"
+        },
+        "east": {
+          "texture": "#body",
+          "uv": [
+            8,
+            0,
+            16,
+            14
+          ],
+          "cullface": "east"
+        },
+        "west": {
+          "texture": "#body",
+          "uv": [
+            8,
+            0,
+            9,
+            14
+          ]
+        }
+      }
+    },
+    {
+      "__comment": "ticket slot panel",
+      "from": [
+        3,
+        10,
+        8
+      ],
+      "to": [
+        13,
+        14,
+        9
+      ],
+      "faces": {
+        "north": {
+          "texture": "#slot",
+          "uv": [
+            3,
+            2,
+            13,
+            6
+          ]
+        },
+        "up": {
+          "texture": "#slot",
+          "uv": [
+            3,
+            2,
+            13,
+            3
+          ]
+        },
+        "down": {
+          "texture": "#slot",
+          "uv": [
+            3,
+            5,
+            13,
+            6
+          ]
+        },
+        "east": {
+          "texture": "#slot",
+          "uv": [
+            12,
+            2,
+            13,
+            6
+          ]
+        },
+        "west": {
+          "texture": "#slot",
+          "uv": [
+            3,
+            2,
+            4,
+            6
+          ]
+        }
+      }
+    },
+    {
+      "__comment": "prize tray lip",
+      "from": [
+        4,
+        3,
+        8
+      ],
+      "to": [
+        12,
+        4,
+        9
+      ],
+      "faces": {
+        "north": {
+          "texture": "#trim",
+          "uv": [
+            4,
+            12,
+            12,
+            13
+          ]
+        },
+        "up": {
+          "texture": "#trim",
+          "uv": [
+            4,
+            8,
+            12,
+            9
+          ]
+        },
+        "east": {
+          "texture": "#trim",
+          "uv": [
+            0,
+            12,
+            1,
+            13
+          ]
+        },
+        "west": {
+          "texture": "#trim",
+          "uv": [
+            0,
+            12,
+            1,
+            13
+          ]
+        }
+      }
+    }
+  ]
+}

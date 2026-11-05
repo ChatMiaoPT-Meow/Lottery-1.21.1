@@ -294,6 +294,32 @@ public class LotteryGameTests {
         });
     }
 
+    /** The 2-tall kiosk: breaking either half removes both and drops exactly one item. */
+    @GameTest(template = "empty")
+    public static void kioskBreaksAsOne(GameTestHelper h) {
+        var lower = ModRegistry.REDEEM_STATION.get().defaultBlockState();
+        var upper = lower.setValue(com.chatmiao.lottery.block.RedeemStationBlock.HALF,
+                net.minecraft.world.level.block.state.properties.DoubleBlockHalf.UPPER);
+        BlockPos a = new BlockPos(0, 1, 0), b = new BlockPos(2, 1, 0);
+        h.setBlock(a, lower);
+        h.setBlock(a.above(), upper);
+        h.setBlock(b, lower);
+        h.setBlock(b.above(), upper);
+        h.destroyBlock(a);          // break the bottom half
+        h.destroyBlock(b.above());  // break the top half
+        h.runAfterDelay(2, () -> {
+            h.assertBlockNotPresent(ModRegistry.REDEEM_STATION.get(), a.above());
+            h.assertBlockNotPresent(ModRegistry.REDEEM_STATION.get(), b);
+            int drops = 0;
+            for (var e : h.getLevel().getEntitiesOfClass(net.minecraft.world.entity.item.ItemEntity.class,
+                    new net.minecraft.world.phys.AABB(h.absolutePos(a)).inflate(5))) {
+                if (e.getItem().is(ModRegistry.REDEEM_STATION_ITEM.get())) drops += e.getItem().getCount();
+            }
+            h.assertTrue(drops == 2, "expected one drop per kiosk (2 total), got " + drops);
+            h.succeed();
+        });
+    }
+
     private static List<ItemStack> winningTickets(ServerPlayer p) {
         return p.getInventory().items.stream().filter(s -> WinningTicketItem.dataOf(s) != null).toList();
     }

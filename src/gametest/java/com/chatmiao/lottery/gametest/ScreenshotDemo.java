@@ -46,7 +46,12 @@ public final class ScreenshotDemo {
         switch (ticks) {
             case 20 -> setupWorld(mc);
             case 80 -> shot(mc, "1_world");
-            case 90 -> mc.setScreen(new TerminalScreen(new Payloads.OpenTerminal(sampleTypes(), 2, 1000)));
+            case 82 -> closeUp(mc);
+            case 88 -> shot(mc, "1b_kiosk");
+            case 90 -> {
+                mc.options.hideGui = false;
+                mc.setScreen(new TerminalScreen(new Payloads.OpenTerminal(sampleTypes(), 2, 1000)));
+            }
             case 110 -> shot(mc, "2_terminal");
             case 112 -> {
                 // type into the search box and select the 2nd item of the pool
@@ -98,10 +103,11 @@ public final class ScreenshotDemo {
         sp.setXRot(25);
         sp.connection.teleport(base.getX() + 0.5, base.getY(), base.getZ() + 0.5, 180, 25);
         BlockPos front = base.north(3);
-        level.setBlockAndUpdate(front.west(), ModRegistry.SCRATCH_TABLE.get().defaultBlockState());
-        level.setBlockAndUpdate(front, ModRegistry.SCRATCH_TABLE.get().defaultBlockState().setValue(ScratchTableBlock.HAS_TICKET, true));
-        level.setBlockAndUpdate(front.east(), ModRegistry.REDEEM_STATION.get().defaultBlockState());
-        level.setBlockAndUpdate(front.east(2), Blocks.AIR.defaultBlockState());
+        level.setBlockAndUpdate(front.west(2), ModRegistry.SCRATCH_TABLE.get().defaultBlockState());
+        level.setBlockAndUpdate(front.west(), ModRegistry.SCRATCH_TABLE.get().defaultBlockState().setValue(ScratchTableBlock.HAS_TICKET, true));
+        placeKiosk(level, front.east(), net.minecraft.core.Direction.SOUTH);
+        placeKiosk(level, front.east(3), net.minecraft.core.Direction.WEST);
+        kiosk = front.east();
         sp.getInventory().setItem(0, ScratchTicketItem.create(1, 64));
         sp.getInventory().setItem(1, ScratchTicketItem.create(2, 12));
         sp.getInventory().setItem(2, ScratchTicketItem.create(3, 3));
@@ -113,6 +119,24 @@ public final class ScreenshotDemo {
         com.chatmiao.lottery.data.TicketNames.put(2, "夏日限定");
         com.chatmiao.lottery.data.TicketNames.put(3, "钻石狂欢");
         mc.gui.setOverlayMessage(Component.literal("刮奖台 / 刮奖台(有票) / 彩票站"), false);
+    }
+
+    private static BlockPos kiosk;
+
+    private static void placeKiosk(ServerLevel level, BlockPos pos, net.minecraft.core.Direction facing) {
+        var lower = ModRegistry.REDEEM_STATION.get().defaultBlockState()
+                .setValue(com.chatmiao.lottery.block.RedeemStationBlock.FACING, facing);
+        level.setBlock(pos, lower, 2);
+        level.setBlock(pos.above(), lower.setValue(com.chatmiao.lottery.block.RedeemStationBlock.HALF,
+                net.minecraft.world.level.block.state.properties.DoubleBlockHalf.UPPER), 2);
+    }
+
+    private static void closeUp(Minecraft mc) {
+        ServerPlayer sp = mc.getSingleplayerServer().getPlayerList().getPlayer(mc.player.getUUID());
+        double x = kiosk.getX() + 0.5 - 1.6, z = kiosk.getZ() + 0.5 + 2.4;
+        float yaw = (float) Math.toDegrees(Math.atan2(-(kiosk.getX() + 0.5 - x), kiosk.getZ() + 0.5 - z));
+        sp.connection.teleport(x, kiosk.getY(), z, yaw, -8);
+        mc.options.hideGui = true;
     }
 
     private static List<TicketType> sampleTypes() {

@@ -1,1 +1,6 @@
-{ "parent": "lottery:block/redeem_station" }
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "lottery:item/redeem_station"
+  }
+}
