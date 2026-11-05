@@ -1,20 +1,21 @@
 {
   "parent": "minecraft:block/block",
-  "ambientocclusion": false,
+  "ambientocclusion": true,
   "textures": {
     "particle": "lottery:block/redeem_station_body",
     "body": "lottery:block/redeem_station_body",
     "base": "lottery:block/redeem_station_base",
     "trim": "lottery:block/redeem_station_trim",
-    "front_lower": "lottery:block/redeem_station_front_lower",
-    "front_upper": "lottery:block/redeem_station_front_upper",
+    "upper": "lottery:block/redeem_station_front_upper",
     "screen": "lottery:block/redeem_station_screen",
-    "slot": "lottery:block/redeem_station_slot",
-    "sign": "lottery:block/redeem_station_sign"
+    "sign": "lottery:block/redeem_station_sign",
+    "panel": "lottery:block/redeem_station_panel",
+    "console": "lottery:block/redeem_station_console",
+    "cabinet": "lottery:block/redeem_station_cabinet"
   },
   "elements": [
     {
-      "__comment": "base plinth",
+      "name": "base plinth",
       "from": [
         0,
         0,
@@ -30,38 +31,38 @@
           "texture": "#base",
           "uv": [
             0,
-            14,
+            0,
             16,
-            16
+            2
           ]
         },
         "south": {
           "texture": "#base",
           "uv": [
             0,
-            14,
+            0,
             16,
-            16
+            2
           ],
           "cullface": "south"
         },
         "east": {
           "texture": "#base",
           "uv": [
+            0,
+            0,
             8,
-            14,
-            16,
-            16
+            2
           ],
           "cullface": "east"
         },
         "west": {
           "texture": "#base",
           "uv": [
-            0,
-            14,
             8,
-            16
+            0,
+            16,
+            2
           ],
           "cullface": "west"
         },
@@ -87,253 +88,265 @@
       }
     },
     {
-      "__comment": "body",
+      "name": "lower cabinet",
       "from": [
-        1,
+        0.5,
         2,
-        9
+        10
       ],
       "to": [
-        15,
-        16,
+        15.5,
+        10,
         16
       ],
       "faces": {
         "north": {
-          "texture": "#front_lower",
-          "uv": [
-            1,
-            0,
-            15,
-            14
-          ]
-        },
-        "south": {
-          "texture": "#body",
-          "uv": [
-            1,
-            0,
-            15,
-            14
-          ],
-          "cullface": "south"
-        }
-      }
-    },
-    {
-      "__comment": "trim left",
-      "from": [
-        0,
-        2,
-        8
-      ],
-      "to": [
-        1,
-        16,
-        16
-      ],
-      "faces": {
-        "north": {
-          "texture": "#trim",
+          "texture": "#cabinet",
           "uv": [
             0,
             0,
-            1,
-            14
+            16,
+            8
           ]
         },
         "south": {
           "texture": "#body",
           "uv": [
             0,
-            0,
-            1,
+            6,
+            16,
             14
           ],
           "cullface": "south"
+        },
+        "east": {
+          "texture": "#body",
+          "uv": [
+            0,
+            6,
+            6,
+            14
+          ]
         },
         "west": {
           "texture": "#body",
           "uv": [
-            8,
             0,
-            16,
-            14
-          ],
-          "cullface": "west"
-        },
-        "east": {
-          "texture": "#body",
-          "uv": [
-            8,
-            0,
-            9,
+            6,
+            6,
             14
           ]
         }
       }
     },
     {
-      "__comment": "trim right",
+      "name": "prize tray lip",
       "from": [
-        15,
-        2,
-        8
+        4,
+        3,
+        9
       ],
       "to": [
-        16,
-        16,
-        16
+        12,
+        4,
+        10
       ],
       "faces": {
         "north": {
           "texture": "#trim",
           "uv": [
-            15,
+            4,
+            12,
+            12,
+            13
+          ]
+        },
+        "up": {
+          "texture": "#trim",
+          "uv": [
+            4,
+            9,
+            12,
+            10
+          ]
+        },
+        "east": {
+          "texture": "#trim",
+          "uv": [
+            9,
+            12,
+            10,
+            13
+          ]
+        },
+        "west": {
+          "texture": "#trim",
+          "uv": [
+            9,
+            12,
+            10,
+            13
+          ]
+        }
+      }
+    },
+    {
+      "name": "console",
+      "from": [
+        0,
+        10,
+        8
+      ],
+      "to": [
+        16,
+        13,
+        16
+      ],
+      "faces": {
+        "north": {
+          "texture": "#console",
+          "uv": [
+            0,
             0,
             16,
-            14
+            3
+          ]
+        },
+        "down": {
+          "texture": "#console",
+          "uv": [
+            0,
+            4,
+            16,
+            6
           ]
         },
         "south": {
           "texture": "#body",
           "uv": [
-            15,
             0,
+            3,
             16,
-            14
+            6
           ],
           "cullface": "south"
         },
         "east": {
           "texture": "#body",
           "uv": [
-            8,
             0,
-            16,
-            14
+            3,
+            8,
+            6
           ],
           "cullface": "east"
         },
         "west": {
           "texture": "#body",
           "uv": [
-            8,
             0,
-            9,
-            14
-          ]
+            3,
+            8,
+            6
+          ],
+          "cullface": "west"
         }
       }
     },
     {
-      "__comment": "ticket slot panel",
+      "name": "sloped control panel",
       "from": [
-        3,
+        0,
         10,
         8
       ],
       "to": [
+        16,
         13,
-        14,
-        9
+        12.25
       ],
       "faces": {
-        "north": {
-          "texture": "#slot",
-          "uv": [
-            3,
-            2,
-            13,
-            6
-          ]
-        },
         "up": {
-          "texture": "#slot",
+          "texture": "#panel",
           "uv": [
-            3,
-            2,
-            13,
-            3
-          ]
-        },
-        "down": {
-          "texture": "#slot",
-          "uv": [
-            3,
-            5,
-            13,
-            6
-          ]
+            0,
+            0,
+            16,
+            4.25
+          ],
+          "rotation": 180
         },
         "east": {
-          "texture": "#slot",
+          "texture": "#body",
           "uv": [
-            12,
-            2,
-            13,
+            0,
+            3,
+            4.25,
             6
           ]
         },
         "west": {
-          "texture": "#slot",
+          "texture": "#body",
           "uv": [
+            0,
             3,
-            2,
-            4,
+            4.25,
             6
           ]
         }
+      },
+      "rotation": {
+        "origin": [
+          8,
+          13,
+          8
+        ],
+        "axis": "x",
+        "angle": -45
       }
     },
     {
-      "__comment": "prize tray lip",
+      "name": "console back",
       "from": [
-        4,
-        3,
-        8
+        0,
+        13,
+        11
       ],
       "to": [
-        12,
-        4,
-        9
+        16,
+        16,
+        16
       ],
       "faces": {
-        "north": {
-          "texture": "#trim",
+        "south": {
+          "texture": "#body",
           "uv": [
-            4,
-            12,
-            12,
-            13
-          ]
-        },
-        "up": {
-          "texture": "#trim",
-          "uv": [
-            4,
-            8,
-            12,
-            9
-          ]
+            0,
+            0,
+            16,
+            3
+          ],
+          "cullface": "south"
         },
         "east": {
-          "texture": "#trim",
+          "texture": "#body",
           "uv": [
             0,
-            12,
-            1,
-            13
-          ]
+            0,
+            5,
+            3
+          ],
+          "cullface": "east"
         },
         "west": {
-          "texture": "#trim",
+          "texture": "#body",
           "uv": [
             0,
-            12,
-            1,
-            13
-          ]
+            0,
+            5,
+            3
+          ],
+          "cullface": "west"
         }
       }
     }

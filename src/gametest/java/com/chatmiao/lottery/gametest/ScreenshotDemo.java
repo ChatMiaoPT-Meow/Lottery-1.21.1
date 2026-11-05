@@ -47,9 +47,16 @@ public final class ScreenshotDemo {
             case 20 -> setupWorld(mc);
             case 80 -> shot(mc, "1_world");
             case 82 -> closeUp(mc);
-            case 88 -> shot(mc, "1b_kiosk");
-            case 90 -> {
+            case 86 -> shot(mc, "1b_kiosk");
+            case 87 -> {
+                mc.getSingleplayerServer().overworld().setDayTime(18000);
+                mc.level.setDayTime(18000);
+            }
+            case 96 -> shot(mc, "1c_kiosk_night");
+            case 98 -> {
+                mc.level.setDayTime(6000);
                 mc.options.hideGui = false;
+                mc.getSingleplayerServer().overworld().setDayTime(6000);
                 mc.setScreen(new TerminalScreen(new Payloads.OpenTerminal(sampleTypes(), 2, 1000)));
             }
             case 110 -> shot(mc, "2_terminal");

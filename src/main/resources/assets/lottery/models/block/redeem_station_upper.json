@@ -1,132 +1,46 @@
 {
   "parent": "minecraft:block/block",
-  "ambientocclusion": false,
+  "ambientocclusion": true,
   "textures": {
     "particle": "lottery:block/redeem_station_body",
     "body": "lottery:block/redeem_station_body",
     "base": "lottery:block/redeem_station_base",
     "trim": "lottery:block/redeem_station_trim",
-    "front_lower": "lottery:block/redeem_station_front_lower",
-    "front_upper": "lottery:block/redeem_station_front_upper",
+    "upper": "lottery:block/redeem_station_front_upper",
     "screen": "lottery:block/redeem_station_screen",
-    "slot": "lottery:block/redeem_station_slot",
-    "sign": "lottery:block/redeem_station_sign"
+    "sign": "lottery:block/redeem_station_sign",
+    "panel": "lottery:block/redeem_station_panel",
+    "console": "lottery:block/redeem_station_console",
+    "cabinet": "lottery:block/redeem_station_cabinet"
   },
   "elements": [
     {
-      "__comment": "body",
+      "name": "upper body",
       "from": [
-        1,
+        0,
         0,
         9
       ],
       "to": [
-        15,
-        12,
-        16
-      ],
-      "faces": {
-        "north": {
-          "texture": "#front_upper",
-          "uv": [
-            1,
-            4,
-            15,
-            16
-          ]
-        },
-        "south": {
-          "texture": "#body",
-          "uv": [
-            1,
-            4,
-            15,
-            16
-          ],
-          "cullface": "south"
-        }
-      }
-    },
-    {
-      "__comment": "trim left",
-      "from": [
-        0,
-        0,
-        8
-      ],
-      "to": [
-        1,
-        12,
-        16
-      ],
-      "faces": {
-        "north": {
-          "texture": "#trim",
-          "uv": [
-            0,
-            4,
-            1,
-            16
-          ]
-        },
-        "south": {
-          "texture": "#body",
-          "uv": [
-            0,
-            4,
-            1,
-            16
-          ],
-          "cullface": "south"
-        },
-        "west": {
-          "texture": "#body",
-          "uv": [
-            8,
-            4,
-            16,
-            16
-          ],
-          "cullface": "west"
-        },
-        "east": {
-          "texture": "#body",
-          "uv": [
-            8,
-            4,
-            9,
-            16
-          ]
-        }
-      }
-    },
-    {
-      "__comment": "trim right",
-      "from": [
-        15,
-        0,
-        8
-      ],
-      "to": [
         16,
-        12,
+        11,
         16
       ],
       "faces": {
         "north": {
-          "texture": "#trim",
+          "texture": "#upper",
           "uv": [
-            15,
-            4,
+            0,
+            0,
             16,
-            16
+            11
           ]
         },
         "south": {
           "texture": "#body",
           "uv": [
-            15,
-            4,
+            0,
+            5,
             16,
             16
           ],
@@ -135,9 +49,9 @@
         "east": {
           "texture": "#body",
           "uv": [
-            8,
-            4,
-            16,
+            0,
+            5,
+            7,
             16
           ],
           "cullface": "east"
@@ -145,79 +59,84 @@
         "west": {
           "texture": "#body",
           "uv": [
-            8,
-            4,
-            9,
+            0,
+            5,
+            7,
             16
-          ]
+          ],
+          "cullface": "west"
         }
       }
     },
     {
-      "__comment": "screen",
+      "name": "screen",
       "from": [
-        2,
-        2,
-        8
+        1,
+        0.5,
+        8.5
       ],
       "to": [
-        14,
-        11,
+        15,
+        10.5,
         9
       ],
       "faces": {
         "north": {
           "texture": "#screen",
           "uv": [
-            2,
-            3,
+            0,
+            0,
             14,
-            12
-          ]
+            10
+          ],
+          "neoforge_data": {
+            "block_light": 15,
+            "sky_light": 15
+          }
         },
         "up": {
-          "texture": "#screen",
+          "texture": "#base",
           "uv": [
             0,
             0,
-            12,
-            1
+            14,
+            0.5
           ]
         },
         "down": {
-          "texture": "#screen",
+          "texture": "#base",
           "uv": [
             0,
             0,
-            12,
-            1
+            14,
+            0.5
           ]
         },
         "east": {
-          "texture": "#screen",
+          "texture": "#base",
           "uv": [
             0,
             0,
-            1,
-            9
+            0.5,
+            10
           ]
         },
         "west": {
-          "texture": "#screen",
+          "texture": "#base",
           "uv": [
             0,
             0,
-            1,
-            9
+            0.5,
+            10
           ]
         }
       }
     },
     {
-      "__comment": "marquee sign",
+      "name": "marquee sign",
       "from": [
         0,
-        12,
+        11,
         8
       ],
       "to": [
@@ -232,16 +151,20 @@
             0,
             0,
             16,
-            4
-          ]
+            5
+          ],
+          "neoforge_data": {
+            "block_light": 15,
+            "sky_light": 15
+          }
         },
         "south": {
           "texture": "#sign",
           "uv": [
             0,
-            0,
+            5,
             16,
-            4
+            8
           ],
           "cullface": "south"
         },
@@ -249,39 +172,47 @@
           "texture": "#sign",
           "uv": [
             0,
-            0,
+            5,
             8,
-            4
+            8
           ],
-          "cullface": "east"
+          "cullface": "east",
+          "neoforge_data": {
+            "block_light": 15,
+            "sky_light": 15
+          }
         },
         "west": {
           "texture": "#sign",
           "uv": [
             8,
-            0,
+            5,
             16,
-            4
+            8
           ],
-          "cullface": "west"
+          "cullface": "west",
+          "neoforge_data": {
+            "block_light": 15,
+            "sky_light": 15
+          }
         },
         "up": {
           "texture": "#sign",
           "uv": [
             0,
-            4,
+            8,
             16,
-            12
+            16
           ],
           "cullface": "up"
         },
         "down": {
-          "texture": "#sign",
+          "texture": "#base",
           "uv": [
             0,
-            4,
+            0,
             16,
-            12
+            8
           ]
         }
       }
