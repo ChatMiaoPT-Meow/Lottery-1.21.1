@@ -57,7 +57,7 @@ public final class ModRegistry {
     }
 
     public static final DeferredBlock<ScratchTableBlock> SCRATCH_TABLE =
-            BLOCKS.register("scratch_table", () -> new ScratchTableBlock(stationProps(MapColor.COLOR_GREEN)));
+            BLOCKS.register("scratch_table", () -> new ScratchTableBlock(stationProps(MapColor.COLOR_GREEN).noOcclusion()));
     public static final DeferredBlock<RedeemStationBlock> REDEEM_STATION =
             BLOCKS.register("redeem_station", () -> new RedeemStationBlock(stationProps(MapColor.COLOR_RED).noOcclusion()
                     .lightLevel(s -> s.getValue(RedeemStationBlock.HALF) == net.minecraft.world.level.block.state.properties.DoubleBlockHalf.UPPER ? 7 : 0)));

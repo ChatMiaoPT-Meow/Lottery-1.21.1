@@ -1,8 +1,397 @@
 {
-  "parent": "minecraft:block/cube_bottom_top",
+  "parent": "minecraft:block/block",
   "textures": {
-    "top": "lottery:block/scratch_table_top",
-    "side": "lottery:block/scratch_table_side",
-    "bottom": "minecraft:block/dark_oak_planks"
-  }
+    "particle": "lottery:block/scratch_table_wood",
+    "wood": "lottery:block/scratch_table_wood",
+    "front": "lottery:block/scratch_table_front",
+    "edge": "lottery:block/scratch_table_edge",
+    "desk": "lottery:block/scratch_table_desk",
+    "coin": "lottery:block/scratch_table_coin",
+    "base": "lottery:block/redeem_station_base"
+  },
+  "elements": [
+    {
+      "name": "plinth",
+      "from": [
+        0,
+        0,
+        1
+      ],
+      "to": [
+        16,
+        1,
+        16
+      ],
+      "faces": {
+        "north": {
+          "texture": "#base",
+          "uv": [
+            0,
+            0,
+            16,
+            1
+          ]
+        },
+        "south": {
+          "texture": "#base",
+          "uv": [
+            0,
+            0,
+            16,
+            1
+          ],
+          "cullface": "south"
+        },
+        "east": {
+          "texture": "#base",
+          "uv": [
+            0,
+            0,
+            15,
+            1
+          ],
+          "cullface": "east"
+        },
+        "west": {
+          "texture": "#base",
+          "uv": [
+            1,
+            0,
+            16,
+            1
+          ],
+          "cullface": "west"
+        },
+        "up": {
+          "texture": "#base",
+          "uv": [
+            0,
+            1,
+            16,
+            16
+          ]
+        },
+        "down": {
+          "texture": "#base",
+          "uv": [
+            0,
+            0,
+            16,
+            15
+          ],
+          "cullface": "down"
+        }
+      }
+    },
+    {
+      "name": "cabinet",
+      "from": [
+        1,
+        1,
+        3
+      ],
+      "to": [
+        15,
+        11,
+        15
+      ],
+      "faces": {
+        "north": {
+          "texture": "#front",
+          "uv": [
+            1,
+            5,
+            15,
+            15
+          ]
+        },
+        "south": {
+          "texture": "#wood",
+          "uv": [
+            1,
+            5,
+            15,
+            15
+          ]
+        },
+        "east": {
+          "texture": "#wood",
+          "uv": [
+            1,
+            5,
+            13,
+            15
+          ]
+        },
+        "west": {
+          "texture": "#wood",
+          "uv": [
+            3,
+            5,
+            15,
+            15
+          ]
+        }
+      }
+    },
+    {
+      "name": "back shelf",
+      "from": [
+        1,
+        11,
+        12
+      ],
+      "to": [
+        15,
+        15,
+        15
+      ],
+      "faces": {
+        "up": {
+          "texture": "#wood",
+          "uv": [
+            1,
+            12,
+            15,
+            15
+          ]
+        },
+        "south": {
+          "texture": "#wood",
+          "uv": [
+            1,
+            1,
+            15,
+            5
+          ]
+        },
+        "east": {
+          "texture": "#wood",
+          "uv": [
+            1,
+            1,
+            4,
+            5
+          ]
+        },
+        "west": {
+          "texture": "#wood",
+          "uv": [
+            12,
+            1,
+            15,
+            5
+          ]
+        }
+      }
+    },
+    {
+      "name": "sloped desk",
+      "from": [
+        0,
+        8,
+        1
+      ],
+      "to": [
+        16,
+        11,
+        13
+      ],
+      "faces": {
+        "up": {
+          "texture": "#desk",
+          "uv": [
+            0,
+            0,
+            16,
+            12
+          ],
+          "rotation": 180
+        },
+        "north": {
+          "texture": "#edge",
+          "uv": [
+            0,
+            0,
+            16,
+            3
+          ]
+        },
+        "south": {
+          "texture": "#edge",
+          "uv": [
+            0,
+            0,
+            16,
+            3
+          ]
+        },
+        "east": {
+          "texture": "#wood",
+          "uv": [
+            3,
+            4,
+            15,
+            7
+          ]
+        },
+        "west": {
+          "texture": "#wood",
+          "uv": [
+            1,
+            4,
+            13,
+            7
+          ]
+        },
+        "down": {
+          "texture": "#wood",
+          "uv": [
+            0,
+            2,
+            16,
+            14
+          ]
+        }
+      },
+      "rotation": {
+        "origin": [
+          8,
+          11,
+          1
+        ],
+        "axis": "x",
+        "angle": -22.5
+      }
+    },
+    {
+      "name": "ticket stop",
+      "from": [
+        0,
+        10.5,
+        0.5
+      ],
+      "to": [
+        16,
+        12,
+        1.5
+      ],
+      "faces": {
+        "north": {
+          "texture": "#coin",
+          "uv": [
+            0,
+            0,
+            16,
+            1.5
+          ]
+        },
+        "up": {
+          "texture": "#coin",
+          "uv": [
+            0,
+            0,
+            16,
+            1
+          ]
+        },
+        "south": {
+          "texture": "#coin",
+          "uv": [
+            0,
+            0,
+            16,
+            1.5
+          ]
+        },
+        "east": {
+          "texture": "#coin",
+          "uv": [
+            0,
+            0,
+            1,
+            1.5
+          ]
+        },
+        "west": {
+          "texture": "#coin",
+          "uv": [
+            0,
+            0,
+            1,
+            1.5
+          ]
+        }
+      }
+    },
+    {
+      "name": "scratch coin",
+      "from": [
+        12.75,
+        11,
+        4.75
+      ],
+      "to": [
+        15.25,
+        11.75,
+        7.25
+      ],
+      "faces": {
+        "up": {
+          "texture": "#coin",
+          "uv": [
+            2,
+            2,
+            14,
+            12
+          ]
+        },
+        "north": {
+          "texture": "#coin",
+          "uv": [
+            0,
+            0,
+            12,
+            3
+          ]
+        },
+        "south": {
+          "texture": "#coin",
+          "uv": [
+            0,
+            0,
+            12,
+            3
+          ]
+        },
+        "east": {
+          "texture": "#coin",
+          "uv": [
+            0,
+            0,
+            10,
+            3
+          ]
+        },
+        "west": {
+          "texture": "#coin",
+          "uv": [
+            0,
+            0,
+            10,
+            3
+          ]
+        }
+      },
+      "rotation": {
+        "origin": [
+          8,
+          11,
+          1
+        ],
+        "axis": "x",
+        "angle": -22.5
+      }
+    }
+  ]
 }

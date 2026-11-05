@@ -1,6 +1,34 @@
 {
   "variants": {
-    "has_ticket=false": { "model": "lottery:block/scratch_table" },
-    "has_ticket=true": { "model": "lottery:block/scratch_table_ticket" }
+    "facing=north,has_ticket=false": {
+      "model": "lottery:block/scratch_table"
+    },
+    "facing=north,has_ticket=true": {
+      "model": "lottery:block/scratch_table_ticket"
+    },
+    "facing=east,has_ticket=false": {
+      "model": "lottery:block/scratch_table",
+      "y": 90
+    },
+    "facing=east,has_ticket=true": {
+      "model": "lottery:block/scratch_table_ticket",
+      "y": 90
+    },
+    "facing=south,has_ticket=false": {
+      "model": "lottery:block/scratch_table",
+      "y": 180
+    },
+    "facing=south,has_ticket=true": {
+      "model": "lottery:block/scratch_table_ticket",
+      "y": 180
+    },
+    "facing=west,has_ticket=false": {
+      "model": "lottery:block/scratch_table",
+      "y": 270
+    },
+    "facing=west,has_ticket=true": {
+      "model": "lottery:block/scratch_table_ticket",
+      "y": 270
+    }
   }
 }

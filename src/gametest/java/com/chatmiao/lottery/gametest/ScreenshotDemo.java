@@ -53,7 +53,13 @@ public final class ScreenshotDemo {
                 mc.level.setDayTime(18000);
             }
             case 96 -> shot(mc, "1c_kiosk_night");
-            case 98 -> {
+            case 97 -> {
+                mc.getSingleplayerServer().overworld().setDayTime(6000);
+                mc.level.setDayTime(6000);
+                tableCloseUp(mc);
+            }
+            case 103 -> shot(mc, "1d_table");
+            case 104 -> {
                 mc.level.setDayTime(6000);
                 mc.options.hideGui = false;
                 mc.getSingleplayerServer().overworld().setDayTime(6000);
@@ -110,8 +116,11 @@ public final class ScreenshotDemo {
         sp.setXRot(25);
         sp.connection.teleport(base.getX() + 0.5, base.getY(), base.getZ() + 0.5, 180, 25);
         BlockPos front = base.north(3);
-        level.setBlockAndUpdate(front.west(2), ModRegistry.SCRATCH_TABLE.get().defaultBlockState());
-        level.setBlockAndUpdate(front.west(), ModRegistry.SCRATCH_TABLE.get().defaultBlockState().setValue(ScratchTableBlock.HAS_TICKET, true));
+        var table = ModRegistry.SCRATCH_TABLE.get().defaultBlockState().setValue(ScratchTableBlock.FACING, net.minecraft.core.Direction.SOUTH);
+        level.setBlockAndUpdate(front.west(2), table);
+        level.setBlockAndUpdate(front.west(), table.setValue(ScratchTableBlock.HAS_TICKET, true));
+        level.setBlockAndUpdate(front.west(4), table.setValue(ScratchTableBlock.FACING, net.minecraft.core.Direction.EAST));
+        tables = front.west();
         placeKiosk(level, front.east(), net.minecraft.core.Direction.SOUTH);
         placeKiosk(level, front.east(3), net.minecraft.core.Direction.WEST);
         kiosk = front.east();
@@ -129,6 +138,14 @@ public final class ScreenshotDemo {
     }
 
     private static BlockPos kiosk;
+    private static BlockPos tables;
+
+    private static void tableCloseUp(Minecraft mc) {
+        ServerPlayer sp = mc.getSingleplayerServer().getPlayerList().getPlayer(mc.player.getUUID());
+        double x = tables.getX() + 0.5 + 1.2, z = tables.getZ() + 0.5 + 2.2;
+        float yaw = (float) Math.toDegrees(Math.atan2(-(tables.getX() + 0.0 - x), tables.getZ() + 0.5 - z));
+        sp.connection.teleport(x, tables.getY(), z, yaw, 30);
+    }
 
     private static void placeKiosk(ServerLevel level, BlockPos pos, net.minecraft.core.Direction facing) {
         var lower = ModRegistry.REDEEM_STATION.get().defaultBlockState()
