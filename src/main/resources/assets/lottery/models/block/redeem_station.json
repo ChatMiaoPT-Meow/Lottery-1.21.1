@@ -1,0 +1,8 @@
+{
+  "parent": "minecraft:block/cube_bottom_top",
+  "textures": {
+    "top": "lottery:block/redeem_station_top",
+    "side": "lottery:block/redeem_station_side",
+    "bottom": "minecraft:block/dark_oak_planks"
+  }
+}

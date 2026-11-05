@@ -1,0 +1,5 @@
+{
+  "variants": {
+    "": { "model": "lottery:block/redeem_station" }
+  }
+}

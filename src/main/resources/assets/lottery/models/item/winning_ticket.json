@@ -1,0 +1,7 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "lottery:item/winning_ticket",
+    "layer1": "lottery:item/winning_ticket_overlay"
+  }
+}

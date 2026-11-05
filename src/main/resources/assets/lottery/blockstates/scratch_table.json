@@ -1,0 +1,6 @@
+{
+  "variants": {
+    "has_ticket=false": { "model": "lottery:block/scratch_table" },
+    "has_ticket=true": { "model": "lottery:block/scratch_table_ticket" }
+  }
+}
