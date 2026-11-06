@@ -42,10 +42,74 @@ import java.util.List;
 public final class ScreenshotDemo {
     private static int ticks = -1;
 
+    /**
+     * Recording mode (-Dlottery.record=true): plays three sequences and saves one frame per tick
+     * (rec_g_* gacha ten-pull, rec_c_* case opening, rec_s_* scratch finale) for an animated preview.
+     */
+    private static void record(Minecraft mc) {
+        ticks++;
+        if (ticks > 90) parkMouse(mc);
+        if (ticks == 20) setupWorld(mc);
+        if (ticks == 60) mc.options.hideGui = true;
+        // --- gacha: vouchers fly → summon → deal → flip → showcase → result wall
+        if (ticks == 100) {
+            com.chatmiao.lottery.data.VoucherNames.replaceAll(java.util.Map.of(
+                    1, new com.chatmiao.lottery.data.VoucherNames.Info("星辉券", 0xF0A020),
+                    2, new com.chatmiao.lottery.data.VoucherNames.Info("限定券", 0x9B59D0)));
+            mc.setScreen(new com.chatmiao.lottery.client.GachaScreen(hubData()));
+            parkMouse(mc);
+        }
+        if (ticks == 110) pressLabel(mc, Component.translatable("gui.lottery.hub.pull_multi", 10, 9).getString());
+        if (ticks == 118) mc.setScreen(new com.chatmiao.lottery.client.SummonScreen(new Payloads.HubState(cardRound(), true, 1, 9, true, NEW_MASK)));
+        if (ticks == 200) press(mc, "gui.lottery.cards.flip_all");
+        frame(mc, "g", 104, 345);
+        // --- case opening
+        if (ticks == 350) {
+            open(mc, caseRound(), 2);
+            parkMouse(mc);
+        }
+        if (ticks == 360) press(mc, "gui.lottery.case.open");
+        frame(mc, "c", 352, 500);
+        // --- scratch: reveal all → stamp → summary
+        if (ticks == 510) {
+            open(mc, sampleRound(0b000_000_101_011), 23);
+            parkMouse(mc);
+        }
+        if (ticks == 522) press(mc, "gui.lottery.scratch.reveal_all");
+        frame(mc, "s", 512, 585);
+        if (ticks == 600) mc.stop();
+    }
+
+    private static void frame(Minecraft mc, String seq, int from, int to) {
+        if (ticks < from || ticks > to) return;
+        shot(mc, String.format("rec_%s_%04d", seq, ticks - from));
+    }
+
+    /**
+     * Keeps the cursor in a corner so no hover tooltip covers the animation. Setting the OS cursor alone is not
+     * enough (screens read MouseHandler's cached position), so the cached position is set too. Dev-only code.
+     */
+    private static void parkMouse(Minecraft mc) {
+        org.lwjgl.glfw.GLFW.glfwSetCursorPos(mc.getWindow().getWindow(), 2, 2);
+        try {
+            for (String name : new String[]{"xpos", "ypos"}) {
+                var f = net.minecraft.client.MouseHandler.class.getDeclaredField(name);
+                f.setAccessible(true);
+                f.setDouble(mc.mouseHandler, 2);
+            }
+        } catch (ReflectiveOperationException e) {
+            LotteryMod.LOGGER.warn("demo: could not park the mouse", e);
+        }
+    }
+
     @SubscribeEvent
     public static void onTick(ClientTickEvent.Post event) {
-        if (!Boolean.getBoolean("lottery.demo")) return;
         Minecraft mc = Minecraft.getInstance();
+        if (Boolean.getBoolean("lottery.record")) {
+            if (mc.player != null && mc.level != null) record(mc);
+            return;
+        }
+        if (!Boolean.getBoolean("lottery.demo")) return;
         if (mc.player == null || mc.level == null) return;
         ticks++;
         switch (ticks) {

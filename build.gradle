@@ -39,6 +39,14 @@ neoForge {
             systemProperty 'lottery.demo', 'true'
             programArguments.addAll '--quickPlaySingleplayer', 'lottery-demo'
         }
+        // Same as demoClient but records one frame per tick of the gacha / case / scratch animations
+        // (run/screenshots/rec_*) for an animated preview.
+        recordClient {
+            client()
+            sourceSet = sourceSets.gametest
+            systemProperty 'lottery.record', 'true'
+            programArguments.addAll '--quickPlaySingleplayer', 'lottery-demo'
+        }
         gameTestServer {
             type = 'gameTestServer'
             // own directory so test ticket types never end up in the dev world's ledger (run/world)
