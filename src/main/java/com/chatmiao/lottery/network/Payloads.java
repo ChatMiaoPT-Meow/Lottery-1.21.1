@@ -3,6 +3,7 @@ package com.chatmiao.lottery.network;
 import com.chatmiao.lottery.LotteryMod;
 import com.chatmiao.lottery.data.Prize;
 import com.chatmiao.lottery.data.HubEntry;
+import com.chatmiao.lottery.data.PrizePool;
 import com.chatmiao.lottery.data.PullRecord;
 import com.chatmiao.lottery.data.TicketType;
 import com.chatmiao.lottery.data.VoucherNames;
@@ -45,32 +46,99 @@ public final class Payloads {
     }
 
     /** Opens (or refreshes) the terminal GUI with the full type list (and voucher types for the pool tab). */
-    public record OpenTerminal(List<TicketType> types, List<VoucherType> vouchers, int selectId, int maxGenerate) implements CustomPacketPayload {
+    public record OpenTerminal(List<TicketType> types, List<VoucherType> vouchers, List<PrizePool> prizePools, int selectId,
+                               int maxGenerate) implements CustomPacketPayload {
         public static final Type<OpenTerminal> TYPE = payloadType("open_terminal");
         public static final StreamCodec<RegistryFriendlyByteBuf, OpenTerminal> CODEC = StreamCodec.of(
                 (buf, p) -> {
                     buf.writeVarInt(p.types.size());
                     for (TicketType t : p.types) t.write(buf);
                     writeVouchers(buf, p.vouchers);
+                    writePools(buf, p.prizePools);
                     buf.writeVarInt(p.selectId);
                     buf.writeVarInt(p.maxGenerate);
                 },
                 buf -> {
-                    int n = buf.readVarInt();
+                    int n = Math.min(buf.readVarInt(), 4096);
                     List<TicketType> list = new ArrayList<>(n);
                     for (int i = 0; i < n; i++) list.add(TicketType.read(buf));
-                    return new OpenTerminal(list, readVouchers(buf), buf.readVarInt(), buf.readVarInt());
+                    return new OpenTerminal(list, readVouchers(buf), readPools(buf), buf.readVarInt(), buf.readVarInt());
                 });
 
         /** Older call sites / tests that don't care about vouchers. */
         public OpenTerminal(List<TicketType> types, int selectId, int maxGenerate) {
-            this(types, List.of(), selectId, maxGenerate);
+            this(types, List.of(), List.of(), selectId, maxGenerate);
+        }
+
+        public OpenTerminal(List<TicketType> types, List<VoucherType> vouchers, int selectId, int maxGenerate) {
+            this(types, vouchers, List.of(), selectId, maxGenerate);
         }
 
         @Override
         public Type<? extends CustomPacketPayload> type() {
             return TYPE;
         }
+    }
+
+    /** The terminal's start menu: three entries, with how many things each one already has. */
+    public record OpenMenu(int vouchers, int prizePools, int types) implements CustomPacketPayload {
+        public static final Type<OpenMenu> TYPE = payloadType("open_menu");
+        public static final StreamCodec<ByteBuf, OpenMenu> CODEC = StreamCodec.composite(
+                ByteBufCodecs.VAR_INT, OpenMenu::vouchers,
+                ByteBufCodecs.VAR_INT, OpenMenu::prizePools,
+                ByteBufCodecs.VAR_INT, OpenMenu::types,
+                OpenMenu::new);
+
+        @Override
+        public Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+    }
+
+    /** 奖池设置: every shared pool, and which types use each one ("#3 名称"). */
+    public record OpenPrizePools(List<PrizePool> pools, Map<Integer, List<String>> usage, int selectId) implements CustomPacketPayload {
+        public static final Type<OpenPrizePools> TYPE = payloadType("open_prize_pools");
+        public static final StreamCodec<RegistryFriendlyByteBuf, OpenPrizePools> CODEC = StreamCodec.of(
+                (buf, p) -> {
+                    writePools(buf, p.pools);
+                    buf.writeVarInt(p.usage.size());
+                    for (Map.Entry<Integer, List<String>> e : p.usage.entrySet()) {
+                        buf.writeVarInt(e.getKey());
+                        buf.writeVarInt(e.getValue().size());
+                        for (String s : e.getValue()) buf.writeUtf(s, 256);
+                    }
+                    buf.writeVarInt(p.selectId);
+                },
+                buf -> {
+                    List<PrizePool> pools = readPools(buf);
+                    int n = Math.min(buf.readVarInt(), 4096);
+                    Map<Integer, List<String>> usage = new HashMap<>();
+                    for (int i = 0; i < n; i++) {
+                        int id = buf.readVarInt();
+                        int m = Math.min(buf.readVarInt(), 4096);
+                        List<String> list = new ArrayList<>(m);
+                        for (int j = 0; j < m; j++) list.add(buf.readUtf(256));
+                        usage.put(id, list);
+                    }
+                    return new OpenPrizePools(pools, usage, buf.readVarInt());
+                });
+
+        @Override
+        public Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+    }
+
+    private static void writePools(RegistryFriendlyByteBuf buf, List<PrizePool> list) {
+        buf.writeVarInt(list.size());
+        for (PrizePool p : list) p.write(buf);
+    }
+
+    private static List<PrizePool> readPools(RegistryFriendlyByteBuf buf) {
+        int n = Math.min(buf.readVarInt(), PrizePool.MAX_POOLS * 4);
+        List<PrizePool> list = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) list.add(PrizePool.read(buf));
+        return list;
     }
 
     private static void writeVouchers(RegistryFriendlyByteBuf buf, List<VoucherType> list) {
@@ -314,7 +382,7 @@ public final class Payloads {
 
     /** Simple request without data: open the gacha screen / history / voucher admin / terminal. */
     public record Request(int what) implements CustomPacketPayload {
-        public static final int HUB = 0, HISTORY = 1, VOUCHERS = 2, TERMINAL = 3;
+        public static final int HUB = 0, HISTORY = 1, VOUCHERS = 2, TERMINAL = 3, MENU = 4, PRIZE_POOLS = 5;
         public static final Type<Request> TYPE = payloadType("request");
         public static final StreamCodec<ByteBuf, Request> CODEC = StreamCodec.composite(ByteBufCodecs.VAR_INT, Request::what, Request::new);
 
@@ -380,6 +448,28 @@ public final class Payloads {
                 ByteBufCodecs.VAR_INT, GenerateVoucher::voucherId,
                 ByteBufCodecs.VAR_INT, GenerateVoucher::count,
                 GenerateVoucher::new);
+
+        @Override
+        public Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+    }
+
+    public record SavePrizePool(PrizePool pool) implements CustomPacketPayload {
+        public static final Type<SavePrizePool> TYPE = payloadType("save_prize_pool");
+        public static final StreamCodec<RegistryFriendlyByteBuf, SavePrizePool> CODEC = StreamCodec.of(
+                (buf, p) -> p.pool.write(buf), buf -> new SavePrizePool(PrizePool.read(buf)));
+
+        @Override
+        public Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+    }
+
+    public record DeletePrizePool(int poolId) implements CustomPacketPayload {
+        public static final Type<DeletePrizePool> TYPE = payloadType("delete_prize_pool");
+        public static final StreamCodec<ByteBuf, DeletePrizePool> CODEC = StreamCodec.composite(
+                ByteBufCodecs.VAR_INT, DeletePrizePool::poolId, DeletePrizePool::new);
 
         @Override
         public Type<? extends CustomPacketPayload> type() {

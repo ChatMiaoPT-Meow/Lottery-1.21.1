@@ -114,11 +114,31 @@ public final class TicketType {
         return Math.min(multiCount, max);
     }
 
+    /**
+     * One prize pool used by this type: a reference to a shared {@link PrizePool} ({@link #poolId}) plus this type's
+     * weight for it. {@link #name}/{@link #tier}/{@link #items} are a snapshot of the referenced pool, refreshed by
+     * {@link LotteryData} whenever pools change (and sent to the terminal for previews). A slot with poolId 0 carries
+     * its own items (saves from before shared pools, tests); the server turns those into shared pools on save/load.
+     */
     public static final class Pool {
+        public int poolId;
         public String name = "";
         public int weight;
         public int tier;
         public final List<PoolItem> items = new ArrayList<>();
+
+        /** Refresh the snapshot from the referenced pool ({@code null} = the pool was deleted). */
+        public void link(PrizePool src) {
+            items.clear();
+            if (src == null) {
+                name = "?";
+                tier = 0;
+                return;
+            }
+            name = src.name;
+            tier = src.tier;
+            for (PoolItem it : src.items) items.add(it.copy());
+        }
 
         public boolean usable() {
             return weight > 0 && totalItemWeight() > 0;
@@ -134,6 +154,7 @@ public final class TicketType {
 
         public Pool copy() {
             Pool p = new Pool();
+            p.poolId = poolId;
             p.name = name;
             p.weight = weight;
             p.tier = tier;
@@ -150,6 +171,13 @@ public final class TicketType {
 
         public boolean usable() {
             return weight > 0 && !item.isEmpty();
+        }
+
+        void sanitize() {
+            item = item.copyWithCount(1);
+            weight = clamp(weight, 0, MAX_WEIGHT);
+            min = clamp(min, 1, MAX_AMOUNT);
+            max = clamp(max, min, MAX_AMOUNT);
         }
 
         public PoolItem copy() {
@@ -260,18 +288,14 @@ public final class TicketType {
         emptyWeight = clamp(emptyWeight, 0, MAX_WEIGHT);
         while (pools.size() > MAX_POOLS) pools.remove(pools.size() - 1);
         for (Pool p : pools) {
+            p.poolId = Math.max(0, p.poolId);
             p.name = p.name == null ? "" : p.name.strip();
             if (p.name.length() > MAX_NAME) p.name = p.name.substring(0, MAX_NAME);
             p.weight = clamp(p.weight, 0, MAX_WEIGHT);
             p.tier = Tier.clamp(p.tier);
             p.items.removeIf(it -> it.item == null || it.item.isEmpty());
             while (p.items.size() > MAX_ITEMS) p.items.remove(p.items.size() - 1);
-            for (PoolItem it : p.items) {
-                it.item = it.item.copyWithCount(1);
-                it.weight = clamp(it.weight, 0, MAX_WEIGHT);
-                it.min = clamp(it.min, 1, MAX_AMOUNT);
-                it.max = clamp(it.max, it.min, MAX_AMOUNT);
-            }
+            for (PoolItem it : p.items) it.sanitize();
         }
         sanitizeStyleOnly();
     }
@@ -292,16 +316,11 @@ public final class TicketType {
         buf.writeVarInt(wins);
         buf.writeVarInt(pools.size());
         for (Pool p : pools) {
+            buf.writeVarInt(p.poolId);
             buf.writeUtf(p.name, 256);
             buf.writeVarInt(p.weight);
             buf.writeVarInt(p.tier);
-            buf.writeVarInt(p.items.size());
-            for (PoolItem it : p.items) {
-                ItemStack.OPTIONAL_STREAM_CODEC.encode(buf, it.item);
-                buf.writeVarInt(it.weight);
-                buf.writeVarInt(it.min);
-                buf.writeVarInt(it.max);
-            }
+            writeItems(buf, p.items);
         }
         buf.writeVarInt(style);
         buf.writeVarInt(draws);
@@ -330,18 +349,11 @@ public final class TicketType {
         int poolCount = Math.min(buf.readVarInt(), MAX_POOLS * 4);
         for (int i = 0; i < poolCount; i++) {
             Pool p = new Pool();
+            p.poolId = buf.readVarInt();
             p.name = buf.readUtf(256);
             p.weight = buf.readVarInt();
             p.tier = buf.readVarInt();
-            int itemCount = Math.min(buf.readVarInt(), MAX_ITEMS * 4);
-            for (int j = 0; j < itemCount; j++) {
-                PoolItem it = new PoolItem();
-                it.item = ItemStack.OPTIONAL_STREAM_CODEC.decode(buf);
-                it.weight = buf.readVarInt();
-                it.min = buf.readVarInt();
-                it.max = buf.readVarInt();
-                p.items.add(it);
-            }
+            readItems(buf, p.items);
             t.pools.add(p);
         }
         t.style = buf.readVarInt();
@@ -374,20 +386,15 @@ public final class TicketType {
         ListTag poolList = new ListTag();
         for (Pool p : pools) {
             CompoundTag pt = new CompoundTag();
-            pt.putString("name", p.name);
             pt.putInt("weight", p.weight);
-            pt.putInt("tier", p.tier);
-            ListTag items = new ListTag();
-            for (PoolItem it : p.items) {
-                if (it.item.isEmpty()) continue;
-                CompoundTag itTag = new CompoundTag();
-                itTag.put("item", it.item.save(provider));
-                itTag.putInt("weight", it.weight);
-                itTag.putInt("min", it.min);
-                itTag.putInt("max", it.max);
-                items.add(itTag);
+            if (p.poolId > 0) {
+                pt.putInt("pool", p.poolId);
+            } else {
+                // a self-contained slot (not yet turned into a shared pool) keeps its contents
+                pt.putString("name", p.name);
+                pt.putInt("tier", p.tier);
+                pt.put("items", saveItems(p.items, provider));
             }
-            pt.put("items", items);
             poolList.add(pt);
         }
         tag.put("pools", poolList);
@@ -421,19 +428,11 @@ public final class TicketType {
         for (Tag pTag : tag.getList("pools", Tag.TAG_COMPOUND)) {
             CompoundTag pt = (CompoundTag) pTag;
             Pool p = new Pool();
+            p.poolId = pt.getInt("pool"); // 0 in saves from before shared pools: contents are inline
             p.name = pt.getString("name");
             p.weight = pt.getInt("weight");
             p.tier = pt.getInt("tier"); // missing in old saves -> 0 (普通)
-            for (Tag iTag : pt.getList("items", Tag.TAG_COMPOUND)) {
-                CompoundTag it = (CompoundTag) iTag;
-                PoolItem pi = new PoolItem();
-                pi.item = ItemStack.parseOptional(provider, it.getCompound("item"));
-                pi.weight = it.getInt("weight");
-                pi.min = it.getInt("min");
-                pi.max = it.getInt("max");
-                // items from a removed mod parse as EMPTY; keep the row out so it can't be rolled
-                if (!pi.item.isEmpty()) p.items.add(pi);
-            }
+            loadItems(pt.getList("items", Tag.TAG_COMPOUND), provider, p.items);
             t.pools.add(p);
         }
         // types saved before play styles existed have no "play" tag and keep the 3×3 / 1-draw defaults
@@ -517,6 +516,57 @@ public final class TicketType {
         h.putInt("weekMask", weekMask);
         h.putInt("delivery", delivery);
         return h;
+    }
+
+    // ---------------- item list helpers (shared with PrizePool) ----------------
+
+    static void writeItems(RegistryFriendlyByteBuf buf, List<PoolItem> items) {
+        buf.writeVarInt(items.size());
+        for (PoolItem it : items) {
+            ItemStack.OPTIONAL_STREAM_CODEC.encode(buf, it.item);
+            buf.writeVarInt(it.weight);
+            buf.writeVarInt(it.min);
+            buf.writeVarInt(it.max);
+        }
+    }
+
+    static void readItems(RegistryFriendlyByteBuf buf, List<PoolItem> out) {
+        int n = Math.min(buf.readVarInt(), MAX_ITEMS * 4);
+        for (int j = 0; j < n; j++) {
+            PoolItem it = new PoolItem();
+            it.item = ItemStack.OPTIONAL_STREAM_CODEC.decode(buf);
+            it.weight = buf.readVarInt();
+            it.min = buf.readVarInt();
+            it.max = buf.readVarInt();
+            out.add(it);
+        }
+    }
+
+    static ListTag saveItems(List<PoolItem> items, HolderLookup.Provider provider) {
+        ListTag list = new ListTag();
+        for (PoolItem it : items) {
+            if (it.item.isEmpty()) continue;
+            CompoundTag itTag = new CompoundTag();
+            itTag.put("item", it.item.save(provider));
+            itTag.putInt("weight", it.weight);
+            itTag.putInt("min", it.min);
+            itTag.putInt("max", it.max);
+            list.add(itTag);
+        }
+        return list;
+    }
+
+    static void loadItems(ListTag list, HolderLookup.Provider provider, List<PoolItem> out) {
+        for (Tag iTag : list) {
+            CompoundTag it = (CompoundTag) iTag;
+            PoolItem pi = new PoolItem();
+            pi.item = ItemStack.parseOptional(provider, it.getCompound("item"));
+            pi.weight = it.getInt("weight");
+            pi.min = it.getInt("min");
+            pi.max = it.getInt("max");
+            // items from a removed mod parse as EMPTY; keep the row out so it can't be rolled
+            if (!pi.item.isEmpty()) out.add(pi);
+        }
     }
 
     private void loadHub(CompoundTag h) {

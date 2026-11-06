@@ -31,6 +31,8 @@ public final class LotteryData extends SavedData {
     private final Map<String, WinRecord> wins = new HashMap<>();
     /** Pity counters: player -> type id -> draws in a row without a prize of the type's pity tier. */
     private final Map<UUID, Map<Integer, Integer>> pity = new HashMap<>();
+    private int nextPoolId = 1;
+    private final TreeMap<Integer, PrizePool> prizePools = new TreeMap<>();
     private int nextVoucherId = 1;
     private final TreeMap<Integer, VoucherType> vouchers = new TreeMap<>();
     /** Paid-for but not yet collected gacha pulls, one per player. */
@@ -145,10 +147,109 @@ public final class LotteryData extends SavedData {
             stored.scratched = old.scratched;
             stored.wins = old.wins;
         }
+        adoptInline(stored);
+        relink(stored);
         types.put(stored.id, stored);
         TicketNames.put(stored.id, stored.name);
         setDirty();
         return stored;
+    }
+
+    // ---------------- shared prize pools (奖池) ----------------
+
+    public Collection<PrizePool> prizePools() {
+        return prizePools.values();
+    }
+
+    public PrizePool prizePool(int id) {
+        return prizePools.get(id);
+    }
+
+    /** Create (id <= 0) or update a shared pool; every type using it sees the change right away. @return null if full */
+    public PrizePool savePrizePool(PrizePool input) {
+        input.sanitize();
+        PrizePool stored = input.copy();
+        if (input.id <= 0 || !prizePools.containsKey(input.id)) {
+            if (prizePools.size() >= PrizePool.MAX_POOLS) return null;
+            stored.id = nextPoolId++;
+        }
+        prizePools.put(stored.id, stored);
+        relinkAll();
+        setDirty();
+        return stored;
+    }
+
+    /** Types (by id) whose slots reference the pool. */
+    public List<TicketType> usersOf(int poolId) {
+        List<TicketType> out = new java.util.ArrayList<>();
+        for (TicketType t : types.values()) {
+            for (TicketType.Pool p : t.pools) {
+                if (p.poolId == poolId) {
+                    out.add(t);
+                    break;
+                }
+            }
+        }
+        return out;
+    }
+
+    /** Deletes an unused pool. @return false if it doesn't exist or some type still uses it */
+    public boolean deletePrizePool(int id) {
+        if (!prizePools.containsKey(id) || !usersOf(id).isEmpty()) return false;
+        prizePools.remove(id);
+        setDirty();
+        return true;
+    }
+
+    /** Pool id -> "#3 名称" of every type using it (for the pool screen). */
+    public Map<Integer, List<String>> poolUsage() {
+        Map<Integer, List<String>> map = new HashMap<>();
+        for (TicketType t : types.values()) {
+            for (TicketType.Pool p : t.pools) {
+                if (p.poolId <= 0) continue;
+                List<String> list = map.computeIfAbsent(p.poolId, k -> new java.util.ArrayList<>());
+                String label = "#" + t.id + " " + t.name;
+                if (!list.contains(label)) list.add(label);
+            }
+        }
+        return map;
+    }
+
+    /**
+     * Turns self-contained slots (poolId 0 with items: saves from before shared pools, or code that builds a type
+     * by hand) into shared pools named "类型名·池名". Empty self-contained slots are dropped.
+     */
+    private boolean adoptInline(TicketType t) {
+        boolean changed = false;
+        for (java.util.Iterator<TicketType.Pool> it = t.pools.iterator(); it.hasNext(); ) {
+            TicketType.Pool slot = it.next();
+            if (slot.poolId > 0) continue;
+            changed = true;
+            if (slot.items.isEmpty()) {
+                it.remove();
+                continue;
+            }
+            PrizePool pool = new PrizePool();
+            pool.id = nextPoolId++;
+            String base = slot.name == null || slot.name.isBlank() ? "奖池" : slot.name.strip();
+            pool.name = t.name == null || t.name.isBlank() ? base : t.name.strip() + "·" + base;
+            pool.tier = slot.tier;
+            for (TicketType.PoolItem item : slot.items) pool.items.add(item.copy());
+            pool.sanitize();
+            prizePools.put(pool.id, pool);
+            slot.poolId = pool.id;
+        }
+        return changed;
+    }
+
+    private void relink(TicketType t) {
+        for (TicketType.Pool slot : t.pools) {
+            if (slot.poolId > 0) slot.link(prizePools.get(slot.poolId));
+        }
+    }
+
+    private void relinkAll() {
+        for (TicketType t : types.values()) relink(t);
     }
 
     public Map<Integer, String> typeNames() {
@@ -206,6 +307,19 @@ public final class LotteryData extends SavedData {
             data.types.put(type.id, type);
             data.nextTypeId = Math.max(data.nextTypeId, type.id + 1);
         }
+        data.nextPoolId = Math.max(1, tag.getInt("nextPoolId"));
+        for (Tag t : tag.getList("prizePools", Tag.TAG_COMPOUND)) {
+            PrizePool p = PrizePool.load((CompoundTag) t, provider);
+            data.prizePools.put(p.id, p);
+            data.nextPoolId = Math.max(data.nextPoolId, p.id + 1);
+        }
+        boolean migrated = false;
+        for (TicketType type : data.types.values()) migrated |= data.adoptInline(type);
+        data.relinkAll();
+        if (migrated) {
+            com.chatmiao.lottery.LotteryMod.LOGGER.info("Moved per-type prize pools into shared pools ({} pools)", data.prizePools.size());
+            data.setDirty();
+        }
         for (Tag t : tag.getList("wins", Tag.TAG_COMPOUND)) {
             WinRecord r = WinRecord.load((CompoundTag) t, provider);
             data.wins.put(r.winId, r);
@@ -257,6 +371,10 @@ public final class LotteryData extends SavedData {
         ListTag typeList = new ListTag();
         for (TicketType t : types.values()) typeList.add(t.save(provider));
         tag.put("types", typeList);
+        tag.putInt("nextPoolId", nextPoolId);
+        ListTag poolList = new ListTag();
+        for (PrizePool p : prizePools.values()) poolList.add(p.save(provider));
+        tag.put("prizePools", poolList);
         ListTag winList = new ListTag();
         for (WinRecord r : wins.values()) winList.add(r.save(provider));
         tag.put("wins", winList);

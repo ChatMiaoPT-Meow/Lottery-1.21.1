@@ -2,6 +2,7 @@ package com.chatmiao.lottery.logic;
 
 import com.chatmiao.lottery.LotteryConfig;
 import com.chatmiao.lottery.data.LotteryData;
+import com.chatmiao.lottery.data.PrizePool;
 import com.chatmiao.lottery.data.TicketType;
 import com.chatmiao.lottery.data.VoucherType;
 import com.chatmiao.lottery.item.VoucherItem;
@@ -19,15 +20,65 @@ import java.util.List;
 /** 彩票终端 server logic. Every request re-checks the operator permission. */
 public final class TerminalService {
 
+    /** The terminal's start menu (卡券设置 / 奖池设置 / 卡池设置). */
+    public static void openMenu(ServerPlayer player) {
+        if (!allowed(player)) return;
+        LotteryData data = LotteryData.get(player.server);
+        Network.send(player, new Payloads.OpenMenu(data.vouchers().size(), data.prizePools().size(), data.types().size()));
+    }
+
+    /** 卡池设置: ticket types / gacha pools. */
     public static void open(ServerPlayer player, int selectId) {
         LotteryData data = LotteryData.get(player.server);
         List<TicketType> types = new ArrayList<>(data.types());
-        Network.send(player, new Payloads.OpenTerminal(types, new ArrayList<>(data.vouchers()), selectId, LotteryConfig.maxGenerate()));
+        Network.send(player, new Payloads.OpenTerminal(types, new ArrayList<>(data.vouchers()), new ArrayList<>(data.prizePools()),
+                selectId, LotteryConfig.maxGenerate()));
     }
 
-    /** Re-open the terminal from another admin screen (permission re-checked). */
+    /** Re-open the type editor from another admin screen (permission re-checked). */
     public static void reopen(ServerPlayer player) {
         if (allowed(player)) open(player, 0);
+    }
+
+    // ---------------- shared prize pools ----------------
+
+    public static void openPrizePools(ServerPlayer player, int selectId) {
+        if (!allowed(player)) return;
+        LotteryData data = LotteryData.get(player.server);
+        Network.send(player, new Payloads.OpenPrizePools(new ArrayList<>(data.prizePools()), data.poolUsage(), selectId));
+    }
+
+    public static void savePrizePool(ServerPlayer player, PrizePool input) {
+        if (!allowed(player)) return;
+        LotteryData data = LotteryData.get(player.server);
+        boolean created = input.id <= 0 || data.prizePool(input.id) == null;
+        PrizePool stored = data.savePrizePool(input);
+        if (stored == null) {
+            player.displayClientMessage(Component.translatable("message.lottery.pool.full", PrizePool.MAX_POOLS).withStyle(ChatFormatting.RED), true);
+            openPrizePools(player, 0);
+            return;
+        }
+        LotteryLog.log(player.server, "CONFIG", LotteryLog.who(player) + (created ? " created" : " updated") + " prize pool #"
+                + stored.id + " " + stored.name + " tier=" + stored.tier + " items=" + stored.items.size()
+                + " usedBy=" + data.usersOf(stored.id).size());
+        player.displayClientMessage(Component.translatable("message.lottery.pool.saved", stored.id, stored.name)
+                .withStyle(ChatFormatting.GREEN), true);
+        openPrizePools(player, stored.id);
+    }
+
+    public static void deletePrizePool(ServerPlayer player, int poolId) {
+        if (!allowed(player)) return;
+        LotteryData data = LotteryData.get(player.server);
+        PrizePool pool = data.prizePool(poolId);
+        if (pool == null) return;
+        if (!data.deletePrizePool(poolId)) {
+            player.displayClientMessage(Component.translatable("message.lottery.pool.in_use", pool.name, data.usersOf(poolId).size())
+                    .withStyle(ChatFormatting.RED), true);
+        } else {
+            LotteryLog.log(player.server, "CONFIG", LotteryLog.who(player) + " deleted prize pool #" + poolId + " " + pool.name);
+            player.displayClientMessage(Component.translatable("message.lottery.pool.deleted", pool.name).withStyle(ChatFormatting.YELLOW), true);
+        }
+        openPrizePools(player, 0);
     }
 
     public static void openVouchers(ServerPlayer player, int selectId) {

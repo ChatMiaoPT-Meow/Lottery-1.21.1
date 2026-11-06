@@ -546,6 +546,71 @@ public class LotteryGameTests {
         return p;
     }
 
+    /**
+     * Shared prize pools: one pool used by two types with different weights; editing the pool changes what both
+     * draw; a pool in use can't be deleted; inline pools (old saves / hand-built types) become shared pools.
+     */
+    @GameTest(template = "empty")
+    public static void sharedPrizePools(GameTestHelper h) {
+        LotteryData data = LotteryData.get(h.getLevel().getServer());
+        com.chatmiao.lottery.data.PrizePool gold = new com.chatmiao.lottery.data.PrizePool();
+        gold.name = "共享金池";
+        gold.tier = 4;
+        TicketType.PoolItem diamond = new TicketType.PoolItem();
+        diamond.item = new ItemStack(Items.DIAMOND);
+        diamond.weight = 1;
+        gold.items.add(diamond);
+        gold = data.savePrizePool(gold);
+        h.assertTrue(gold != null && gold.id > 0, "pool gets an id");
+
+        TicketType a = new TicketType();
+        a.name = "共享A";
+        a.emptyWeight = 0;
+        TicketType.Pool slotA = new TicketType.Pool();
+        slotA.poolId = gold.id;
+        slotA.weight = 5;
+        a.pools.add(slotA);
+        a = data.saveType(a);
+        TicketType b = new TicketType();
+        b.name = "共享B";
+        b.emptyWeight = 1;
+        TicketType.Pool slotB = new TicketType.Pool();
+        slotB.poolId = gold.id;
+        slotB.weight = 1;
+        b.pools.add(slotB);
+        b = data.saveType(b);
+
+        TicketType storedA = data.type(a.id), storedB = data.type(b.id);
+        h.assertTrue(storedA.pools.get(0).tier == 4 && storedA.pools.get(0).items.size() == 1, "slot sees the pool's tier and items");
+        h.assertTrue(storedA.pools.get(0).weight == 5 && storedB.pools.get(0).weight == 1, "each type keeps its own weight");
+        h.assertTrue(Math.abs(storedB.winChance() - 0.5) < 1e-9, "B: 1 empty vs 1 pool = 50%");
+        Prize p = Roller.roll(storedA, RandomSource.create(1));
+        h.assertTrue(p != null && p.item().is(Items.DIAMOND), "A draws from the shared pool");
+
+        // edit the pool once: both types follow
+        gold.items.get(0).item = new ItemStack(Items.EMERALD);
+        gold.tier = 5;
+        data.savePrizePool(gold);
+        h.assertTrue(data.type(a.id).pools.get(0).items.get(0).item.is(Items.EMERALD)
+                && data.type(b.id).pools.get(0).tier == 5, "pool edits reach every type using it");
+
+        h.assertTrue(!data.deletePrizePool(gold.id), "a pool in use can't be deleted");
+        h.assertTrue(data.usersOf(gold.id).size() == 2, "both types listed as users");
+
+        // a hand-built inline pool is turned into a shared one on save
+        TicketType c = saveType(h, "内联", 0, pool("旧池", 1, new ItemStack(Items.GOLD_INGOT), 1, 1, 1));
+        int adopted = c.pools.get(0).poolId;
+        h.assertTrue(adopted > 0 && data.prizePool(adopted) != null && data.prizePool(adopted).name.equals("内联·旧池"),
+                "inline pool becomes a shared pool");
+
+        // once no type uses it, it can be deleted
+        TicketType cEdit = data.type(c.id).copy();
+        cEdit.pools.clear();
+        data.saveType(cEdit);
+        h.assertTrue(data.deletePrizePool(adopted) && data.prizePool(adopted) == null, "unused pool can be deleted");
+        h.succeed();
+    }
+
     /** Full flow: load stack → open (rolls) → reopen (same result) → collect → redeem → no double redeem. */
     @GameTest(template = "empty")
     public static void scratchAndRedeem(GameTestHelper h) {

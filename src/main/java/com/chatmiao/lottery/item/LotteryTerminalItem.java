@@ -29,7 +29,7 @@ public class LotteryTerminalItem extends Item {
                 sp.displayClientMessage(Component.translatable("message.lottery.no_permission").withStyle(ChatFormatting.RED), true);
                 return InteractionResultHolder.fail(stack);
             }
-            TerminalService.open(sp, 0);
+            TerminalService.openMenu(sp);
         }
         return InteractionResultHolder.sidedSuccess(stack, level.isClientSide);
     }

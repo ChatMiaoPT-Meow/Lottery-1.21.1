@@ -21,6 +21,19 @@ public final class ClientBridge {
         }
     }
 
+    public static void openMenu(Payloads.OpenMenu p) {
+        Minecraft.getInstance().setScreen(new TerminalMenuScreen(p));
+    }
+
+    public static void openPrizePools(Payloads.OpenPrizePools p) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.screen instanceof PrizePoolScreen screen) {
+            screen.update(p);
+        } else {
+            mc.setScreen(new PrizePoolScreen(p));
+        }
+    }
+
     public static void scratchState(Payloads.ScratchState p) {
         Minecraft mc = Minecraft.getInstance();
         if (p.round() == null) {

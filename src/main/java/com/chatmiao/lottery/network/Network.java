@@ -21,7 +21,8 @@ public final class Network {
     public static void register(RegisterPayloadHandlersEvent event) {
         // "2": play styles / multi-draw tickets changed TicketType, ScratchRound and Reveal on the wire
         // "3": gacha pools + vouchers (TicketType hub fields, OpenTerminal vouchers, hub payloads)
-        PayloadRegistrar r = event.registrar("3");
+        // "4": shared prize pools (TicketType slots carry a pool id, terminal menu / pool payloads)
+        PayloadRegistrar r = event.registrar("4");
 
         // Client-bound handlers only touch ClientBridge inside the lambda body, so the client
         // classes are never loaded on a dedicated server. Handlers run on the main thread.
@@ -55,6 +56,8 @@ public final class Network {
                 case Payloads.Request.HISTORY -> com.chatmiao.lottery.logic.HubService.history(player);
                 case Payloads.Request.VOUCHERS -> TerminalService.openVouchers(player, 0);
                 case Payloads.Request.TERMINAL -> TerminalService.reopen(player);
+                case Payloads.Request.MENU -> TerminalService.openMenu(player);
+                case Payloads.Request.PRIZE_POOLS -> TerminalService.openPrizePools(player, 0);
                 default -> { }
             }
         });
@@ -64,6 +67,13 @@ public final class Network {
                 (p, ctx) -> com.chatmiao.lottery.logic.HubService.reveal((ServerPlayer) ctx.player(), p.roundId(), p.mask()));
         r.playToServer(Payloads.HubFinish.TYPE, Payloads.HubFinish.CODEC,
                 (p, ctx) -> com.chatmiao.lottery.logic.HubService.finish((ServerPlayer) ctx.player(), p.roundId(), p.again()));
+        // terminal menu + shared prize pools
+        r.playToClient(Payloads.OpenMenu.TYPE, Payloads.OpenMenu.CODEC, (p, ctx) -> ClientBridge.openMenu(p));
+        r.playToClient(Payloads.OpenPrizePools.TYPE, Payloads.OpenPrizePools.CODEC, (p, ctx) -> ClientBridge.openPrizePools(p));
+        r.playToServer(Payloads.SavePrizePool.TYPE, Payloads.SavePrizePool.CODEC,
+                (p, ctx) -> TerminalService.savePrizePool((ServerPlayer) ctx.player(), p.pool()));
+        r.playToServer(Payloads.DeletePrizePool.TYPE, Payloads.DeletePrizePool.CODEC,
+                (p, ctx) -> TerminalService.deletePrizePool((ServerPlayer) ctx.player(), p.poolId()));
         r.playToServer(Payloads.SaveVoucher.TYPE, Payloads.SaveVoucher.CODEC,
                 (p, ctx) -> TerminalService.saveVoucher((ServerPlayer) ctx.player(), p.voucher()));
         r.playToServer(Payloads.GenerateVoucher.TYPE, Payloads.GenerateVoucher.CODEC,

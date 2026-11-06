@@ -4,9 +4,12 @@ import com.chatmiao.lottery.LotteryMod;
 import com.chatmiao.lottery.client.ClientEvents;
 import com.chatmiao.lottery.client.GachaScreen;
 import com.chatmiao.lottery.client.PlayScreen;
+import com.chatmiao.lottery.client.PrizePoolScreen;
+import com.chatmiao.lottery.client.TerminalMenuScreen;
 import com.chatmiao.lottery.client.TerminalScreen;
 import com.chatmiao.lottery.client.VoucherScreen;
 import com.chatmiao.lottery.data.HubEntry;
+import com.chatmiao.lottery.data.PrizePool;
 import com.chatmiao.lottery.logic.TerminalService;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Screenshot;
@@ -251,6 +254,28 @@ public final class ConfigDemo {
         return () -> center(widget(name));
     }
 
+    /** One arrow ("prev"/"next") of a ◀ value ▶ stepper field. */
+    private static Supplier<float[]> stepper(String name, String arrow) {
+        return () -> {
+            Screen s = Minecraft.getInstance().screen;
+            Object st = s == null ? null : field(s, name);
+            return st == null ? null : center((AbstractWidget) field(st, arrow));
+        };
+    }
+
+    /** A row of the "all pools" list in the 卡池设置 pools tab. */
+    @SuppressWarnings("unchecked")
+    private static Supplier<float[]> availRow(String name) {
+        return () -> {
+            List<PrizePool> pools = (List<PrizePool>) field(Minecraft.getInstance().screen, "prizePools");
+            if (pools == null) return null;
+            for (int i = 0; i < pools.size(); i++) {
+                if (pools.get(i).name.equals(name)) return new float[]{intField("colBX") + 40, intField("availY") + i * 12 + 6};
+            }
+            return null;
+        };
+    }
+
     /** The terminal search result showing {@code item}. */
     @SuppressWarnings("unchecked")
     private static Supplier<float[]> result(Item item) {
@@ -299,7 +324,7 @@ public final class ConfigDemo {
                 ServerPlayer sp = server.getPlayerList().getPlayer(m.player.getUUID());
                 server.getPlayerList().op(sp.getGameProfile()); // the admin may use the terminal
                 sp.getInventory().clearContent();
-                TerminalService.open(sp, 0);
+                TerminalService.openMenu(sp);
             });
             return 10;
         });
@@ -308,8 +333,10 @@ public final class ConfigDemo {
             return 6;
         });
 
-        say("① 打开彩票终端，进入「卡券管理」");
-        clickOn(button("gui.lottery.terminal.vouchers"));
+        say("① 右键彩票终端，进入「卡券设置」");
+        waitFor(() -> mc.screen instanceof TerminalMenuScreen, 40);
+        wait(10);
+        clickOn(button("gui.lottery.menu.vouchers"));
         waitFor(() -> mc.screen instanceof VoucherScreen, 40);
         wait(6);
 
@@ -325,90 +352,88 @@ public final class ConfigDemo {
         clickOn(button("gui.lottery.terminal.generate"));
         wait(12);
 
-        say("④ 回到终端，新建彩票「星辉十连」");
+        say("④ 返回菜单，进入「奖池设置」");
         clickOn(button("gui.lottery.vouchers.back"));
+        waitFor(() -> mc.screen instanceof TerminalMenuScreen, 40);
+        wait(8);
+        clickOn(button("gui.lottery.menu.pools"));
+        waitFor(() -> mc.screen instanceof PrizePoolScreen, 40);
+        wait(6);
+
+        say("⑤ 新建奖池「普通」：铁锭 ×8~16，保存");
+        clickOn(button("gui.lottery.pools.new"));
+        type("nameBox", "普通");
+        type("searchBox", "铁锭");
+        clickOn(result(Items.IRON_INGOT));
+        type("minBox", "8");
+        type("maxBox", "16");
+        clickOn(button("gui.lottery.terminal.save"));
+        wait(12);
+
+        say("⑥ 奖池「史诗」：钻石。稀有度点过头了？点 ◀ 退回一格");
+        clickOn(button("gui.lottery.pools.new"));
+        type("nameBox", "史诗");
+        clicks(stepper("tierStep", "next"), 4);
+        wait(6);
+        clickOn(stepper("tierStep", "prev"));
+        type("searchBox", "钻石");
+        clickOn(result(Items.DIAMOND));
+        clickOn(button("gui.lottery.terminal.save"));
+        wait(12);
+
+        say("⑦ 奖池「神话」：下界之星。从「普通」点 ◀ 直接到「神话」");
+        clickOn(button("gui.lottery.pools.new"));
+        type("nameBox", "神话");
+        clickOn(stepper("tierStep", "prev"));
+        type("searchBox", "下界之星");
+        clickOn(result(Items.NETHER_STAR));
+        clickOn(button("gui.lottery.terminal.save"));
+        wait(14);
+
+        say("⑧ 返回菜单，进入「卡池设置」，新建「星辉十连」");
+        clickOn(button("gui.lottery.menu.back"));
+        waitFor(() -> mc.screen instanceof TerminalMenuScreen, 40);
+        wait(8);
+        clickOn(button("gui.lottery.menu.types"));
         waitFor(() -> mc.screen instanceof TerminalScreen, 40);
         wait(6);
         clickOn(button("gui.lottery.terminal.new"));
         type("nameBox", "星辉十连");
         type("emptyBox", "40");
 
-        say("⑤ 奖池「普通」：铁锭 ×8~16");
+        say("⑨ 奖池页签：点击加入三个奖池，分别设权重 60 / 8 / 2");
         clickOn(button("gui.lottery.terminal.tab_pools"));
-        clickOn(widgetAt("addPoolBtn"));
-        type("poolNameBox", "普通");
-        type("poolWeightBox", "60");
-        type("searchBox", "铁锭");
-        clickOn(result(Items.IRON_INGOT));
-        type("itemMinBox", "8");
-        type("itemMaxBox", "16");
+        clickOn(availRow("普通"));
+        type("slotWeightBox", "60");
+        clickOn(availRow("史诗"));
+        type("slotWeightBox", "8");
+        clickOn(availRow("神话"));
+        type("slotWeightBox", "2");
+        wait(10);
 
-        say("⑥ 奖池「史诗」：钻石，稀有度点到「史诗」");
-        clickOn(widgetAt("addPoolBtn"));
-        type("poolNameBox", "史诗");
-        type("poolWeightBox", "8");
-        clicks(widgetAt("poolTierBtn"), 2);
-        type("searchBox", "钻石");
-        clickOn(result(Items.DIAMOND));
-
-        say("⑦ 奖池「神话」：下界之星，稀有度点到「神话」");
-        clickOn(widgetAt("addPoolBtn"));
-        type("poolNameBox", "神话");
-        type("poolWeightBox", "2");
-        clicks(widgetAt("poolTierBtn"), 3);
-        type("searchBox", "下界之星");
-        clickOn(result(Items.NETHER_STAR));
-        wait(8);
-
-        say("⑧ 票型：卡牌抽卡，保底 50 抽必出神话，十连至少一个史诗");
+        say("⑩ 玩法：卡牌抽卡，保底 50 抽必出神话，十连至少一个史诗");
         clickOn(button("gui.lottery.terminal.tab_style"));
-        clicks(widgetAt("styleBtn"), 2);
+        clicks(stepper("styleStep", "next"), 2);
         type("drawsBox", "10");
         type("pityCountBox", "50");
-        clicks(widgetAt("pityTierBtn"), 1);
-        clicks(widgetAt("guarTierBtn"), 4);
+        clickOn(stepper("pityTierStep", "next"));
+        clicks(stepper("guarTierStep", "next"), 4);
         wait(8);
 
-        say("⑨ 卡池：上架，用星辉券，单抽 1 张、10 连 9 张");
+        say("⑪ 上架：用星辉券，单抽 1 张、10 连 9 张");
         clickOn(button("gui.lottery.terminal.tab_hub"));
         clickOn(widgetAt("hubBtn"));
-        // cycle the voucher button until it shows our voucher
-        for (int i = 0; i < 6; i++) {
-            add(m -> {
-                AbstractWidget b = widget("voucherBtn");
-                boolean ok = b != null && b.getMessage().getString().equals("星辉券");
-                if (!ok && b != null) {
-                    fromX = curX;
-                    fromY = curY;
-                    float[] c = center(b);
-                    toX = c[0];
-                    toY = c[1];
-                    moveStart = ticks;
-                    moveDur = 6;
-                }
-                return ok ? 0 : 8;
-            });
-            add(m -> {
-                AbstractWidget b = widget("voucherBtn");
-                if (b != null && !b.getMessage().getString().equals("星辉券")) {
-                    m.screen.mouseClicked(curX, curY, 0);
-                    m.screen.mouseReleased(curX, curY, 0);
-                    clickAt = ticks;
-                    return 6;
-                }
-                return 0;
-            });
-        }
+        clickOn(stepper("voucherStep", "next"));
         type("costSingleBox", "1");
         type("multiCountBox", "10");
         type("costMultiBox", "9");
         wait(10);
 
-        say("⑩ 保存：卡池马上开放，不需要生成彩票");
+        say("⑫ 保存：卡池马上开放，不需要生成彩票");
         clickOn(button("gui.lottery.terminal.save"));
         wait(24);
 
-        say("⑪ 玩家按 K 打开卡池，点「10 连」");
+        say("⑬ 玩家按 K 打开卡池，点「10 连」");
         add(m -> {
             m.setScreen(null);
             return 6;

@@ -96,7 +96,7 @@ public class VoucherScreen extends Screen {
             refresh();
         }).bounds(left + 6, top + H - 40, LIST_W, 14).build());
         addRenderableWidget(Button.builder(Component.translatable("gui.lottery.vouchers.back"), b ->
-                PacketDistributor.sendToServer(new Payloads.Request(Payloads.Request.TERMINAL)))
+                PacketDistributor.sendToServer(new Payloads.Request(Payloads.Request.MENU)))
                 .bounds(left + 6, top + H - 22, LIST_W, 14).build());
         refresh();
     }
