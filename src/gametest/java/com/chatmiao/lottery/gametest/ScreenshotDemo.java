@@ -62,27 +62,27 @@ public final class ScreenshotDemo {
         if (ticks == 110) pressLabel(mc, Component.translatable("gui.lottery.hub.pull_multi", 10, 9).getString());
         if (ticks == 118) mc.setScreen(new com.chatmiao.lottery.client.SummonScreen(new Payloads.HubState(cardRound(), true, 1, 9, true, NEW_MASK)));
         if (ticks == 252) press(mc, "gui.lottery.cards.flip_all");
-        frame(mc, "g", 104, 400);
+        frame(mc, "g", 104, 480);
         // --- case opening
-        if (ticks == 410) {
+        if (ticks == 490) {
             open(mc, caseRound(), 2);
             parkMouse(mc);
         }
-        if (ticks == 420) press(mc, "gui.lottery.case.open");
-        frame(mc, "c", 412, 560);
+        if (ticks == 500) press(mc, "gui.lottery.case.open");
+        frame(mc, "c", 492, 640);
         // --- scratch: reveal all → stamp → summary
-        if (ticks == 570) {
+        if (ticks == 650) {
             open(mc, sampleRound(0b000_000_101_011), 23);
             parkMouse(mc);
         }
-        if (ticks == 582) press(mc, "gui.lottery.scratch.reveal_all");
-        frame(mc, "s", 572, 645);
+        if (ticks == 662) press(mc, "gui.lottery.scratch.reveal_all");
+        frame(mc, "s", 652, 725);
         // --- single pull: silver lead-in beats → pause → the gold one → its card
-        if (ticks == 660) mc.setScreen(new com.chatmiao.lottery.client.SummonScreen(
+        if (ticks == 740) mc.setScreen(new com.chatmiao.lottery.client.SummonScreen(
                 new Payloads.HubState(singleRound(), true, 1, 1, true, 1L)));
-        if (ticks == 775) press(mc, "gui.lottery.cards.flip_all");
-        frame(mc, "u", 660, 850);
-        if (ticks == 865) mc.stop();
+        if (ticks == 855) press(mc, "gui.lottery.cards.flip_all");
+        frame(mc, "u", 740, 930);
+        if (ticks == 945) mc.stop();
     }
 
     private static void frame(Minecraft mc, String seq, int from, int to) {

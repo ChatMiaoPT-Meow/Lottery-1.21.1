@@ -76,6 +76,8 @@ public abstract class PlayScreen extends Screen {
     private boolean summaryHidden;
     private boolean builtWithSummary;
     private int summaryTilesSounded;
+    /** The full-screen mythic showcase already ran for this ticket. */
+    private boolean mythicPlayed;
     private int sx, sy, sw, sh, sCols;
     private final List<Button> overlayButtons = new ArrayList<>();
 
@@ -141,6 +143,7 @@ public abstract class PlayScreen extends Screen {
         summaryShownAt = -1;
         summaryHidden = false;
         summaryTilesSounded = 0;
+        mythicPlayed = false;
         onNewRound();
         finished = allRevealed();
         finishedAt = -10_000;
@@ -162,6 +165,27 @@ public abstract class PlayScreen extends Screen {
     /** Ticks between finishing a winning ticket and the summary popping up (room for the style's own finale). */
     protected int summaryDelay() {
         return 20;
+    }
+
+    /** Ticks after finishing before the mythic showcase (lets the style's own reveal land first). */
+    protected int mythicDelay() {
+        return 14;
+    }
+
+    private List<Draw> mythics() {
+        List<Draw> out = new ArrayList<>();
+        for (Draw d : round.draws) if (d.won() && d.tier() >= MythicScreen.MYTHIC) out.add(d);
+        return out;
+    }
+
+    /** Back from the mythic showcase: show the result summary right away. */
+    void afterMythic() {
+        if (finished && round.won()) {
+            summaryAt = ticks;
+            summaryShownAt = -1;
+            summaryHidden = false;
+            summaryTilesSounded = 0;
+        }
     }
 
     protected boolean isRevealed(int bit) {
@@ -589,6 +613,15 @@ public abstract class PlayScreen extends Screen {
         }
         particles.clear();
         particles.addAll(next);
+        // a freshly revealed mythic prize gets its full-screen moment before the summary
+        if (finished && !mythicPlayed && finishedAt > -10_000 && ticks - finishedAt >= mythicDelay()) {
+            mythicPlayed = true;
+            List<Draw> mythics = mythics();
+            if (!mythics.isEmpty()) {
+                minecraft.setScreen(new MythicScreen(this, mythics));
+                return;
+            }
+        }
         if (summaryVisible() != builtWithSummary) rebuildWidgets();
         if (builtWithSummary) {
             // a chime for every card/tile that pops in, pitched by rarity (a soft click for empty draws)
