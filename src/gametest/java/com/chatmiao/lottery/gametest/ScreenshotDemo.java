@@ -71,14 +71,9 @@ public final class ScreenshotDemo {
                 mc.setScreen(new TerminalScreen(new Payloads.OpenTerminal(sampleTypes(), 2, 1000)));
             }
             case 110 -> shot(mc, "2_terminal");
+            // pools tab: search for "锭" and select the 2nd item of the pool
             case 112 -> {
-                // type into the search box and select the 2nd item of the pool
-                var boxes = mc.screen.children().stream()
-                        .filter(w -> w instanceof net.minecraft.client.gui.components.EditBox)
-                        .map(w -> (net.minecraft.client.gui.components.EditBox) w).toList();
-                boxes.get(7).setValue("锭");
-                int left = (mc.screen.width - 420) / 2, top = (mc.screen.height - 238) / 2;
-                mc.screen.mouseClicked(left + 268 + 40, top + 20 + 18 + 5, 0);
+                if (mc.screen instanceof TerminalScreen ts) ts.demo(1, "锭", 1);
             }
             case 118 -> shot(mc, "2b_terminal_edit");
             // style tab for each play style
@@ -92,40 +87,53 @@ public final class ScreenshotDemo {
             case 142 -> press(mc, "gui.lottery.terminal.tab_style");
             case 148 -> shot(mc, "2e_style_cards");
             // classic 3×3
+            // classic 3×3: intro pop, partly scratched, then "全部揭开" → stamp → prize summary
             case 150 -> open(mc, sampleRound(0b000_000_101_011), 23);
+            case 152 -> shot(mc, "3a_intro");
             case 170 -> shot(mc, "3_scratch_partial");
-            case 180 -> open(mc, sampleRound(0xFFF), 23);
-            case 200 -> shot(mc, "4_scratch_won");
-            case 210 -> {
+            case 172 -> press(mc, "gui.lottery.scratch.reveal_all");
+            case 181 -> shot(mc, "4a_stamp_falling");
+            case 192 -> shot(mc, "4_scratch_won");
+            case 215 -> shot(mc, "4c_summary");
+            case 220 -> {
                 ScratchRound lost = sampleRound(0xFFF);
                 lost.draws = List.of(Draw.EMPTY);
                 lost.hitCells = new int[]{-1};
                 lost.board[4] = 17;
                 open(mc, lost, 0);
             }
-            case 230 -> shot(mc, "5_scratch_lost");
-            // new styles
+            case 235 -> shot(mc, "5_scratch_lost");
+            // 10×4, already finished: summary straight away, then "看票面"
             case 240 -> open(mc, bigMatchRound(), 5);
-            case 260 -> shot(mc, "8_match_10x4");
+            case 256 -> shot(mc, "8a_match_summary");
+            case 258 -> press(mc, "gui.lottery.summary.view");
+            case 264 -> shot(mc, "8_match_10x4");
+            // case opening: shake → burst → spin → overshoot → legendary pillar → summary
             case 270 -> open(mc, caseRound(), 2);
-            case 272 -> press(mc, "gui.lottery.case.open");
-            case 300 -> shot(mc, "9_case_spinning");
-            case 380 -> shot(mc, "9b_case_done");
-            case 390 -> open(mc, cardRound(), 9);
-            case 392 -> press(mc, "gui.lottery.cards.flip_all");
-            case 410 -> shot(mc, "10_cards_flipping");
-            case 470 -> shot(mc, "10b_cards_done");
-            case 480 -> mc.setScreen(new RedeemScreen(new Payloads.OpenRedeem(BlockPos.ZERO, List.of(
+            case 280 -> press(mc, "gui.lottery.case.open");
+            case 290 -> shot(mc, "9a_case_opening");
+            case 315 -> shot(mc, "9_case_spinning");
+            case 366 -> shot(mc, "9c_case_pillar");
+            case 384 -> shot(mc, "9b_case_done");
+            case 415 -> shot(mc, "9d_case_summary");
+            // card draw: dealing → flipping (rare charge) → showcase → summary
+            case 420 -> open(mc, cardRound(), 9);
+            case 431 -> shot(mc, "10a_cards_dealing");
+            case 455 -> press(mc, "gui.lottery.cards.flip_all");
+            case 491 -> shot(mc, "10_cards_flipping");
+            case 512 -> shot(mc, "10b_cards_done");
+            case 560 -> shot(mc, "10c_cards_summary");
+            case 570 -> mc.setScreen(new RedeemScreen(new Payloads.OpenRedeem(BlockPos.ZERO, List.of(
                     new Payloads.RedeemEntry("W2-ABCDEFGH", "夏日限定"), new Payloads.RedeemEntry("W2-JKLMNPQR", "夏日限定")))));
-            case 500 -> shot(mc, "6_redeem_box");
-            case 510 -> {
+            case 590 -> shot(mc, "6_redeem_box");
+            case 600 -> {
                 if (mc.screen instanceof RedeemScreen rs) {
                     rs.onResult(new Payloads.RedeemResult(List.of(
                             new Prize(new ItemStack(Items.DIAMOND), 5), new Prize(new ItemStack(Items.GOLD_INGOT), 12)), List.of()));
                 }
             }
-            case 532 -> shot(mc, "7_redeem_opened");
-            case 550 -> mc.stop();
+            case 622 -> shot(mc, "7_redeem_opened");
+            case 640 -> mc.stop();
             default -> {}
         }
     }

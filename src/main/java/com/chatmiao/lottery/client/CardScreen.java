@@ -21,12 +21,18 @@ public class CardScreen extends PlayScreen {
     private static final int FLIP_TICKS = 6, RARE_TICKS = 16, QUEUE_INTERVAL = 4;
     private static final int RARE_TIER = 3;
 
+    private static final int DEAL_DELAY = 6, DEAL_STAGGER = 2, DEAL_FLIGHT = 8;
+    private static final int SHOWCASE_TICKS = 30;
+
     private int count, perRow, rowCount;
     private int cardW, cardH;
     /** Tick a card started flipping, or -1. */
     private int[] flipTick;
     private ArrayDeque<Integer> queue;
     private int lastQueued;
+    /** Tick dealing starts, or -1 when the cards are already on the table (reopened ticket). */
+    private int dealStart;
+    private int dealtSounded;
 
     public CardScreen(Payloads.ScratchState state) {
         super(state);
@@ -40,6 +46,39 @@ public class CardScreen extends PlayScreen {
         flipTick = new int[count];
         java.util.Arrays.fill(flipTick, -1);
         queue = new ArrayDeque<>();
+        // a fresh ticket is dealt from the deck; a reopened one is already on the table
+        dealStart = revealed == 0 ? ticks + DEAL_DELAY : -1;
+        dealtSounded = 0;
+    }
+
+    private boolean dealing() {
+        return dealStart >= 0 && ticks < dealStart + (count - 1) * DEAL_STAGGER + DEAL_FLIGHT;
+    }
+
+    /** Index of the best prize card (highest tier), or -1. */
+    private int bestCard() {
+        int best = -1;
+        for (int i = 0; i < count; i++) {
+            Draw d = draw(i);
+            if (d.won() && (best < 0 || d.tier() > draw(best).tier())) best = i;
+        }
+        return best;
+    }
+
+    @Override
+    protected int summaryDelay() {
+        return SHOWCASE_TICKS + 6;
+    }
+
+    @Override
+    protected void onFinished() {
+        super.onFinished();
+        int best = bestCard();
+        if (best >= 0 && draw(best).tier() >= 2) {
+            int[] r = cardRect(best);
+            burstAt(r[0], r[1], r[2], r[3], 30, Tier.color(draw(best).tier()));
+            play(SoundEvents.AMETHYST_BLOCK_CHIME, 1.0F, 1.0F);
+        }
     }
 
     @Override
@@ -83,7 +122,7 @@ public class CardScreen extends PlayScreen {
         Button all = button(Component.translatable("gui.lottery.cards.flip_all"), left + panelW / 2 - 45, y, 90, b -> flipAll());
         boolean pending = false;
         for (int i = 0; i < count; i++) if (!isRevealed(i) && flipTick[i] < 0 && !queue.contains(i)) pending = true;
-        all.active = pending;
+        all.active = pending && !dealing();
     }
 
     private void flipAll() {
@@ -118,7 +157,16 @@ public class CardScreen extends PlayScreen {
 
     @Override
     public void tick() {
+        boolean wasDealing = dealing();
         super.tick();
+        if (dealStart >= 0) {
+            int launched = Mth.clamp((ticks - dealStart) / DEAL_STAGGER + 1, 0, count);
+            while (dealtSounded < launched) {
+                play(SoundEvents.BOOK_PAGE_TURN, 1.4F + rnd.nextFloat() * 0.3F, 0.5F);
+                dealtSounded++;
+            }
+        }
+        if (wasDealing && !dealing()) rebuildWidgets(); // enable "全部翻开"
         if (!queue.isEmpty() && ticks - lastQueued >= QUEUE_INTERVAL) {
             lastQueued = ticks;
             flip(queue.poll());
@@ -131,7 +179,7 @@ public class CardScreen extends PlayScreen {
     @Override
     public boolean mouseClicked(double mx, double my, int button) {
         if (super.mouseClicked(mx, my, button)) return true;
-        if (button != 0 || finished) return false;
+        if (button != 0 || finished || dealing()) return false;
         int i = cardAt(mx, my);
         if (i >= 0) {
             flip(i);
@@ -161,15 +209,16 @@ public class CardScreen extends PlayScreen {
     }
 
     @Override
-    public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
-        super.render(g, mouseX, mouseY, partialTick);
-        g.drawString(font, Component.translatable("gui.lottery.cards.title", round.typeName, count), left + 8, top + 6, 0xFFFFFFFF, true);
-        g.drawString(font, Component.translatable("gui.lottery.scratch.sub", round.typeId, stock), left + 8, top + 18, 0xFFF0F0F0, false);
+    protected void renderContent(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
+        titleBar(g, Component.translatable("gui.lottery.cards.title", round.typeName, count));
 
         float now = ticks + partialTick;
-        int hovered = cardAt(mouseX, mouseY);
-        for (int i = 0; i < count; i++) drawCard(g, i, now, i == hovered && !finished);
-        renderParticles(g);
+        int hovered = dealing() ? -1 : cardAt(mouseX, mouseY);
+        drawDeck(g, now);
+        drawChargePillars(g, now);
+        int best = finished ? bestCard() : -1;
+        for (int i = 0; i < count; i++) if (i != best) drawCard(g, i, now, i == hovered && !finished);
+        if (best >= 0) drawShowcase(g, best, now); // on top of its neighbours
 
         int noteY = top + panelH - 40;
         if (waiting) {
@@ -185,9 +234,85 @@ public class CardScreen extends PlayScreen {
         }
     }
 
+    private int deckX() {
+        return left + panelW / 2;
+    }
+
+    private int deckY() {
+        return top + panelH - 36;
+    }
+
+    /** The face-down deck the cards are dealt from (only while dealing). */
+    private void drawDeck(GuiGraphics g, float now) {
+        if (dealStart < 0 || !dealing()) return;
+        int remaining = count - Mth.clamp((int) ((now - dealStart) / DEAL_STAGGER) + 1, 0, count);
+        if (remaining <= 0) return;
+        int w = cardW * 2 / 3, h = cardH * 2 / 3;
+        for (int k = Math.min(3, remaining) - 1; k >= 0; k--) {
+            g.pose().pushPose();
+            g.pose().translate(deckX() - w / 2F + k * 2, deckY() - h / 2F - k * 2, 0);
+            g.pose().scale(w / (float) cardW, h / (float) cardH, 1);
+            drawBack(g, 0, cardW, cardH, 0);
+            g.pose().popPose();
+        }
+    }
+
+    /** Light pillars that build up over rare cards while they shake, before they flip. */
+    private void drawChargePillars(GuiGraphics g, float now) {
+        for (int i = 0; i < count; i++) {
+            if (!rare(i) || flipTick[i] < 0 || isRevealed(i)) continue;
+            float t = Mth.clamp((now - flipTick[i]) / flipDuration(i), 0, 1);
+            int[] r = cardRect(i);
+            lightPillar(g, r[0] - 2, top + 32, r[1] + r[3], r[2] + 4, Tier.color(draw(i).tier()), 0.3F + t * 0.7F);
+        }
+    }
+
+    /** The best card, enlarged for a moment when the ticket is finished, then left glowing. */
+    private void drawShowcase(GuiGraphics g, int i, float now) {
+        int[] r = cardRect(i);
+        float t = (now - finishedAt) / SHOWCASE_TICKS;
+        float scale;
+        if (t < 0.3F) {
+            scale = 1 + 0.25F * popScale(t / 0.3F);
+        } else if (t < 1) {
+            scale = 1.25F - 0.25F * ((t - 0.3F) / 0.7F);
+        } else {
+            scale = 1;
+        }
+        int tc = Tier.color(draw(i).tier());
+        float pulse = 0.5F + 0.5F * Mth.sin(now * 0.25F);
+        int a = (int) (90 + 120 * pulse);
+        g.pose().pushPose();
+        g.pose().translate(0, 0, 150);
+        g.pose().translate(r[0] + r[2] / 2F, r[1] + r[3] / 2F, 0);
+        g.pose().scale(scale, scale, 1);
+        g.pose().translate(-r[2] / 2F, -r[3] / 2F, 0);
+        g.fill(-3, -3, r[2] + 3, r[3] + 3, (a << 24) | tc);
+        drawFront(g, i, r[2], r[3]);
+        g.pose().popPose();
+    }
+
     private void drawCard(GuiGraphics g, int i, float now, boolean hover) {
         int[] r = cardRect(i);
         int x = r[0], y = r[1], w = r[2], h = r[3];
+        if (dealStart >= 0) {
+            float d = (now - dealStart - i * DEAL_STAGGER) / DEAL_FLIGHT;
+            if (d <= 0) return; // still in the deck
+            if (d < 1) {
+                // flying from the deck to its slot: ease out, spinning down and growing
+                float e = 1 - (1 - d) * (1 - d) * (1 - d);
+                float fx = deckX() + (x + w / 2F - deckX()) * e, fy = deckY() + (y + h / 2F - deckY()) * e;
+                float s = 0.66F + 0.34F * e;
+                g.pose().pushPose();
+                g.pose().translate(fx, fy, 50);
+                g.pose().mulPose(com.mojang.math.Axis.ZP.rotationDegrees((1 - e) * (i % 2 == 0 ? -30 : 30)));
+                g.pose().scale(s, s, 1);
+                g.pose().translate(-w / 2F, -h / 2F, 0);
+                drawBack(g, i, w, h, 0);
+                g.pose().popPose();
+                return;
+            }
+        }
         boolean front;
         float xScale = 1;
         float shake = 0;

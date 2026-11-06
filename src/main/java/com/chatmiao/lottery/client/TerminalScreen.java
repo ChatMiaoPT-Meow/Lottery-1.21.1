@@ -9,7 +9,9 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.locale.Language;
 import net.minecraft.network.chat.Component;
+import net.minecraft.util.Mth;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -21,21 +23,24 @@ import java.util.Locale;
 import java.util.function.IntConsumer;
 
 /**
- * 彩票终端 GUI (OP only). Three columns:
- * lottery types | selected type settings + (tab) prize pools or play style | pool items + search, or a live preview.
+ * 彩票终端 GUI (OP only). The window grows with the screen.
+ * <pre>
+ * ┌ 彩票列表 ┬ [基本信息] [奖池] [票型] ─────────── 编号 #2 * ┐
+ * │ #1 …     │                                                │
+ * │ #2 …   ▐ │   content of the selected tab                  │
+ * │ [+ 新建] │ status …            数量 [64] [生成] [保存]     │
+ * └──────────┴────────────────────────────────────────────────┘
+ * </pre>
  * Edits are local until "保存"; the server assigns the type number on first save.
  */
 public class TerminalScreen extends Screen {
-    private static final int W = 420, H = 238;
-    private static final int TYPE_ROWS = 14, TYPE_ROW_H = 12;
-    private static final int POOL_ROWS = 5, POOL_ROW_H = 11, POOL_Y = 112;
-    private static final int ITEM_ROWS = 4, ITEM_ROW_H = 18;
-    private static final int RESULT_COLS = 8, RESULT_ROWS = 2;
-    // style tab rows (relative to top)
-    private static final int S_STYLE = 112, S_DRAWS = 128, S_LAYOUT = 144, S_EXTRA = 160, S_PITY = 176, S_GUAR = 192;
+    private static final int LIST_W = 112, TYPE_ROW_H = 12, POOL_ROW_H = 12, ITEM_ROW_H = 18, CELL = 18;
+    private static final int TAB_BASIC = 0, TAB_POOLS = 1, TAB_STYLE = 2;
+    private static final int S_TYPES = 0, S_POOLS = 1, S_ITEMS = 2, S_RESULTS = 3;
 
-    private static final int C_PANEL = 0xF0202329, C_COL = 0xFF2B2F36, C_BORDER = 0xFF4A505C,
-            C_TEXT = 0xFFE8E8E8, C_DIM = 0xFF9AA0AA, C_ACCENT = 0xFFFFC94A, C_SEL = 0xFF3D5A80, C_BAD = 0xFFE06060;
+    private static final int C_PANEL = 0xF0202329, C_COL = 0xFF2B2F36, C_BORDER = 0xFF4A505C, C_INSET = 0xFF1A1D22,
+            C_TEXT = 0xFFE8E8E8, C_DIM = 0xFF9AA0AA, C_ACCENT = 0xFFFFC94A, C_SEL = 0xFF3D5A80, C_BAD = 0xFFE06060,
+            C_TAB = 0xFF23262C, C_TAB_HOVER = 0xFF30343C;
 
     private List<TicketType> types = new ArrayList<>();
     private int maxGenerate = 1000;
@@ -43,18 +48,27 @@ public class TerminalScreen extends Screen {
     private boolean dirty;
     private Integer pendingSwitch;
     private int selPool = -1, selItem = -1;
-    private int typeScroll, poolScroll, itemScroll, resultScroll;
-    private boolean styleTab;
+    private final int[] scroll = new int[4];
+    private int tab = TAB_BASIC;
     private Component status = Component.empty();
     private int statusColor = C_DIM;
     private final List<ItemStack> results = new ArrayList<>();
     private boolean loading;
+    /** Scrollbar being dragged (S_*), or -1. */
+    private int dragging = -1;
+
+    // layout
+    private int W, H, left, top, cx, cw, ct, cb;
+    private int typeRows;
+    private int colAX, colAW, colBX, colBW;
+    private int poolY, poolRows, itemY, itemRows, itemEditY, searchY, resultY, resultCols, resultRows;
+    private int previewY, previewH;
 
     private EditBox nameBox, emptyBox, poolNameBox, poolWeightBox, itemWeightBox, itemMinBox, itemMaxBox, searchBox, countBox;
     private EditBox drawsBox, winCountBox, colsBox, rowsBox, rangeBox, spinBox, cardColsBox, pityCountBox;
     private Button enableBtn, addPoolBtn, delPoolBtn, delItemBtn, offhandBtn, generateBtn, saveBtn;
-    private Button poolTabBtn, styleTabBtn, poolTierBtn, styleBtn, rareBtn, pityTierBtn, guarTierBtn;
-    private int left, top, midX, rightX;
+    private Button poolTierBtn, styleBtn, rareBtn, pityTierBtn, guarTierBtn;
+    private final List<TabButton> tabs = new ArrayList<>();
 
     private record IndexEntry(ItemStack stack, String name, String id) {}
 
@@ -100,7 +114,7 @@ public class TerminalScreen extends Screen {
         pendingSwitch = null;
         selPool = edit.pools.isEmpty() ? -1 : 0;
         selItem = -1;
-        poolScroll = itemScroll = 0;
+        scroll[S_POOLS] = scroll[S_ITEMS] = 0;
     }
 
     private void newType() {
@@ -111,6 +125,7 @@ public class TerminalScreen extends Screen {
         dirty = true;
         pendingSwitch = null;
         selPool = selItem = -1;
+        tab = TAB_BASIC;
     }
 
     private TicketType.Pool pool() {
@@ -129,83 +144,121 @@ public class TerminalScreen extends Screen {
         }
     }
 
-    // ================================================================= widgets
+    // ================================================================= layout + widgets
+
+    private void layout() {
+        W = Mth.clamp(width - 24, 420, 600);
+        H = Mth.clamp(height - 24, 238, 340);
+        left = (width - W) / 2;
+        top = (height - H) / 2;
+        typeRows = (H - 50) / TYPE_ROW_H;
+        cx = left + LIST_W + 12;
+        cw = left + W - 6 - cx;
+        ct = top + 24;
+        cb = top + H - 30;
+
+        // pools tab: pool list + pool editor | items + item editor + search
+        colAX = cx + 4;
+        colAW = (cw - 12) * 2 / 5;
+        colBX = colAX + colAW + 8;
+        colBW = cx + cw - 4 - colBX;
+        poolY = ct + 18;
+        poolRows = Math.max(3, (cb - 52 - poolY) / POOL_ROW_H);
+        itemY = ct + 18;
+        itemRows = Mth.clamp((cb - ct) * 36 / 100 / ITEM_ROW_H, 3, 8);
+        itemEditY = itemY + itemRows * ITEM_ROW_H + 4;
+        searchY = itemEditY + 34;
+        resultY = searchY + 18;
+        resultCols = Math.max(4, (colBW - 6) / CELL);
+        resultRows = Math.max(1, (cb - 20 - resultY) / CELL);
+
+        // style tab preview
+        previewY = ct + 18;
+        previewH = Mth.clamp((cb - ct) / 2 - 10, 60, 120);
+    }
 
     @Override
     protected void init() {
-        left = (width - W) / 2;
-        top = (height - H) / 2;
-        midX = left + 112;
-        rightX = left + 268;
+        layout();
+        tabs.clear();
+        String[] tabKeys = {"gui.lottery.terminal.tab_basic", "gui.lottery.terminal.tab_pools", "gui.lottery.terminal.tab_style"};
+        for (int i = 0; i < tabKeys.length; i++) {
+            int index = i;
+            TabButton t = new TabButton(cx + i * 70, top + 6, 68, 18, Component.translatable(tabKeys[i]), index, b -> {
+                tab = index;
+                refreshWidgets();
+            });
+            tabs.add(addRenderableWidget(t));
+        }
 
-        nameBox = textBox(midX + 30, top + 44, 118, TicketType.MAX_NAME, s -> { edit.name = s; touch(); });
-        emptyBox = numBox(midX + 52, top + 62, 44, v -> { edit.emptyWeight = v; touch(); });
+        // ---- basic tab (form on the left half)
+        int fx = cx + 64;
+        nameBox = textBox(fx, ct + 30, Math.min(160, cw / 2 - 70), TicketType.MAX_NAME, s -> { edit.name = s; touch(); });
+        emptyBox = numBox(fx, ct + 50, 50, v -> { edit.emptyWeight = v; touch(); });
         enableBtn = addRenderableWidget(Button.builder(Component.empty(), b -> {
             edit.enabled = !edit.enabled;
             touch();
             refreshWidgets();
-        }).bounds(midX, top + 80, 60, 14).build());
-
-        poolTabBtn = small(Component.translatable("gui.lottery.terminal.tab_pools"), midX, top + 97, 40, () -> { styleTab = false; refreshWidgets(); });
-        styleTabBtn = small(Component.translatable("gui.lottery.terminal.tab_style"), midX + 42, top + 97, 40, () -> { styleTab = true; refreshWidgets(); });
+        }).bounds(fx, ct + 70, 70, 16).build());
 
         // ---- pools tab
-        addPoolBtn = small(Component.literal("+"), midX + 118, top + 98, 14, this::addPool);
-        delPoolBtn = small(Component.literal("-"), midX + 134, top + 98, 14, this::deletePool);
-        poolNameBox = textBox(midX + 24, top + 170, 66, TicketType.MAX_NAME, s -> {
+        addPoolBtn = small(Component.literal("+"), colAX + colAW - 30, ct + 4, 14, this::addPool);
+        delPoolBtn = small(Component.literal("-"), colAX + colAW - 14, ct + 4, 14, this::deletePool);
+        poolNameBox = textBox(colAX + 30, cb - 48, colAW - 30, TicketType.MAX_NAME, s -> {
             if (pool() != null) { pool().name = s; touch(); }
         });
-        poolWeightBox = numBox(midX + 112, top + 170, 36, v -> {
+        poolWeightBox = numBox(colAX + 30, cb - 32, 44, v -> {
             if (pool() != null) { pool().weight = v; touch(); }
         });
-        poolTierBtn = cycle(midX + 40, top + 186, 108, () -> {
+        poolTierBtn = cycle(colAX + 30, cb - 16, colAW - 30, () -> {
             if (pool() != null) { pool().tier = (pool().tier + 1) % Tier.COUNT; touch(); }
         });
 
-        itemWeightBox = numBox(rightX + 26, top + 96, 40, v -> {
+        itemWeightBox = numBox(colBX + 30, itemEditY, 44, v -> {
             if (item() != null) { item().weight = v; touch(); }
         });
-        itemMinBox = numBox(rightX + 26, top + 112, 34, v -> {
+        itemMinBox = numBox(colBX + 30, itemEditY + 16, 36, v -> {
             if (item() != null) { item().min = v; touch(); }
         });
-        itemMaxBox = numBox(rightX + 70, top + 112, 34, v -> {
+        itemMaxBox = numBox(colBX + 78, itemEditY + 16, 36, v -> {
             if (item() != null) { item().max = v; touch(); }
         });
         delItemBtn = addRenderableWidget(Button.builder(Component.translatable("gui.lottery.terminal.delete"), b -> deleteItem())
-                .bounds(rightX + 108, top + 112, 38, 14).build());
-        searchBox = textBox(rightX, top + 130, 146, 50, s -> updateResults());
+                .bounds(colBX + colBW - 40, itemEditY + 16, 40, 14).build());
+        searchBox = textBox(colBX, searchY, colBW, 50, s -> updateResults());
         searchBox.setHint(Component.translatable("gui.lottery.terminal.search"));
         offhandBtn = addRenderableWidget(Button.builder(Component.translatable("gui.lottery.terminal.offhand"), b -> addOffhand())
-                .bounds(rightX, top + 188, 146, 14).build());
+                .bounds(colBX, cb - 16, colBW, 14).build());
 
-        // ---- style tab
-        styleBtn = cycle(midX + 30, top + S_STYLE, 118, () -> {
-            edit.style = edit.playStyle().next().id;
-            touch();
-        });
-        drawsBox = numBox(midX + 26, top + S_DRAWS, 26, v -> { edit.draws = v; touch(); });
-        winCountBox = numBox(midX + 96, top + S_DRAWS, 24, v -> { edit.winCount = v; touch(); });
-        colsBox = numBox(midX + 26, top + S_LAYOUT, 24, v -> { edit.cols = v; touch(); });
-        rowsBox = numBox(midX + 62, top + S_LAYOUT, 24, v -> { edit.rows = v; touch(); });
-        spinBox = numBox(midX + 52, top + S_LAYOUT, 26, v -> { edit.spinSeconds = v; touch(); });
-        cardColsBox = numBox(midX + 26, top + S_LAYOUT, 24, v -> { edit.cardCols = v; touch(); });
-        rangeBox = numBox(midX + 52, top + S_EXTRA, 26, v -> { edit.numberRange = v; touch(); });
-        rareBtn = cycle(midX, top + S_EXTRA, 148, () -> { edit.rareEffect = !edit.rareEffect; touch(); });
-        pityCountBox = numBox(midX + 26, top + S_PITY, 30, v -> { edit.pityCount = v; touch(); });
-        pityTierBtn = cycle(midX + 96, top + S_PITY, 52, () -> { edit.pityTier = (edit.pityTier + 1) % Tier.COUNT; touch(); });
-        guarTierBtn = cycle(midX + 52, top + S_GUAR, 96, () -> {
+        // ---- style tab (settings on the left, preview on the right)
+        int sx = colAX;
+        int r0 = ct + 22;
+        styleBtn = cycle(sx + 40, r0, 120, () -> { edit.style = edit.playStyle().next().id; touch(); });
+        drawsBox = numBox(sx + 40, r0 + 18, 28, v -> { edit.draws = v; touch(); });
+        winCountBox = numBox(sx + 136, r0 + 18, 24, v -> { edit.winCount = v; touch(); });
+        colsBox = numBox(sx + 40, r0 + 36, 26, v -> { edit.cols = v; touch(); });
+        rowsBox = numBox(sx + 80, r0 + 36, 26, v -> { edit.rows = v; touch(); });
+        spinBox = numBox(sx + 56, r0 + 36, 28, v -> { edit.spinSeconds = v; touch(); });
+        cardColsBox = numBox(sx + 40, r0 + 36, 26, v -> { edit.cardCols = v; touch(); });
+        rangeBox = numBox(sx + 56, r0 + 54, 28, v -> { edit.numberRange = v; touch(); });
+        rareBtn = cycle(sx, r0 + 54, 160, () -> { edit.rareEffect = !edit.rareEffect; touch(); });
+        pityCountBox = numBox(sx + 40, r0 + 80, 32, v -> { edit.pityCount = v; touch(); });
+        pityTierBtn = cycle(sx + 108, r0 + 80, 52, () -> { edit.pityTier = (edit.pityTier + 1) % Tier.COUNT; touch(); });
+        guarTierBtn = cycle(sx + 56, r0 + 98, 104, () -> {
             edit.guaranteeTier = edit.guaranteeTier + 1 >= Tier.COUNT ? -1 : edit.guaranteeTier + 1;
             touch();
         });
 
+        // ---- always visible
         addRenderableWidget(Button.builder(Component.translatable("gui.lottery.terminal.new"), b -> clickNew())
-                .bounds(left + 6, top + 194, 100, 14).build());
-        countBox = numBox(left + 52, top + 216, 44, v -> {});
-        countBox.setValue("64");
-        generateBtn = addRenderableWidget(Button.builder(Component.translatable("gui.lottery.terminal.generate"), b -> generate())
-                .bounds(left + 100, top + 215, 54, 16).build());
+                .bounds(left + 4, top + H - 24, LIST_W, 16).build());
+        int bx = left + W - 6;
         saveBtn = addRenderableWidget(Button.builder(Component.translatable("gui.lottery.terminal.save"), b -> save())
-                .bounds(left + 158, top + 215, 54, 16).build());
+                .bounds(bx - 52, top + H - 24, 52, 16).build());
+        generateBtn = addRenderableWidget(Button.builder(Component.translatable("gui.lottery.terminal.generate"), b -> generate())
+                .bounds(bx - 106, top + H - 24, 50, 16).build());
+        countBox = numBox(bx - 154, top + H - 23, 44, v -> {});
+        countBox.setValue("64");
 
         refreshWidgets();
         updateResults();
@@ -251,14 +304,15 @@ public class TerminalScreen extends Screen {
     private void refreshWidgets() {
         if (nameBox == null) return;
         loading = true;
+        boolean basic = tab == TAB_BASIC, pools = tab == TAB_POOLS, style = tab == TAB_STYLE;
+
+        // ---- basic
+        nameBox.visible = emptyBox.visible = enableBtn.visible = basic;
         nameBox.setValue(edit.name);
         emptyBox.setValue(String.valueOf(edit.emptyWeight));
         enableBtn.setMessage(Component.translatable(edit.enabled ? "gui.lottery.terminal.enabled" : "gui.lottery.terminal.disabled"));
-        poolTabBtn.active = styleTab;
-        styleTabBtn.active = !styleTab;
 
-        // ---- pools tab
-        boolean pools = !styleTab;
+        // ---- pools
         TicketType.Pool p = pool();
         addPoolBtn.visible = delPoolBtn.visible = pools;
         poolNameBox.visible = poolWeightBox.visible = poolTierBtn.visible = pools && p != null;
@@ -278,12 +332,12 @@ public class TerminalScreen extends Screen {
         }
         searchBox.visible = offhandBtn.visible = pools && p != null;
 
-        // ---- style tab
+        // ---- style
         PlayStyle s = edit.playStyle();
-        styleBtn.visible = drawsBox.visible = pityCountBox.visible = pityTierBtn.visible = guarTierBtn.visible = styleTab;
-        winCountBox.visible = colsBox.visible = rowsBox.visible = rangeBox.visible = styleTab && s == PlayStyle.MATCH;
-        spinBox.visible = styleTab && s == PlayStyle.CASE;
-        cardColsBox.visible = rareBtn.visible = styleTab && s == PlayStyle.CARDS;
+        styleBtn.visible = drawsBox.visible = pityCountBox.visible = pityTierBtn.visible = guarTierBtn.visible = style;
+        winCountBox.visible = colsBox.visible = rowsBox.visible = rangeBox.visible = style && s == PlayStyle.MATCH;
+        spinBox.visible = style && s == PlayStyle.CASE;
+        cardColsBox.visible = rareBtn.visible = style && s == PlayStyle.CARDS;
         styleBtn.setMessage(s.label());
         drawsBox.setValue(String.valueOf(edit.draws));
         winCountBox.setValue(String.valueOf(edit.winCount));
@@ -339,7 +393,7 @@ public class TerminalScreen extends Screen {
         edit.pools.add(p);
         selPool = edit.pools.size() - 1;
         selItem = -1;
-        if (selPool >= poolScroll + POOL_ROWS) poolScroll = selPool - POOL_ROWS + 1;
+        if (selPool >= scroll[S_POOLS] + poolRows) scroll[S_POOLS] = selPool - poolRows + 1;
         touch();
         refreshWidgets();
     }
@@ -349,7 +403,7 @@ public class TerminalScreen extends Screen {
         edit.pools.remove(selPool);
         selPool = Math.min(selPool, edit.pools.size() - 1);
         selItem = -1;
-        poolScroll = Math.max(0, Math.min(poolScroll, edit.pools.size() - POOL_ROWS));
+        scroll[S_POOLS] = clampScroll(scroll[S_POOLS], edit.pools.size(), poolRows);
         touch();
         refreshWidgets();
     }
@@ -365,7 +419,7 @@ public class TerminalScreen extends Screen {
         it.item = stack.copyWithCount(1);
         p.items.add(it);
         selItem = p.items.size() - 1;
-        if (selItem >= itemScroll + ITEM_ROWS) itemScroll = selItem - ITEM_ROWS + 1;
+        if (selItem >= scroll[S_ITEMS] + itemRows) scroll[S_ITEMS] = selItem - itemRows + 1;
         touch();
         setStatus("gui.lottery.terminal.item_added", C_DIM, stack.getHoverName());
         refreshWidgets();
@@ -376,7 +430,7 @@ public class TerminalScreen extends Screen {
         if (item() == null) return;
         p.items.remove(selItem);
         selItem = -1;
-        itemScroll = Math.max(0, Math.min(itemScroll, p.items.size() - ITEM_ROWS));
+        scroll[S_ITEMS] = clampScroll(scroll[S_ITEMS], p.items.size(), itemRows);
         touch();
         refreshWidgets();
     }
@@ -421,7 +475,7 @@ public class TerminalScreen extends Screen {
 
     private void updateResults() {
         results.clear();
-        resultScroll = 0;
+        scroll[S_RESULTS] = 0;
         if (searchBox == null) return;
         String q = searchBox.getValue().strip().toLowerCase(Locale.ROOT);
         if (q.isEmpty()) return;
@@ -449,80 +503,144 @@ public class TerminalScreen extends Screen {
         index = list;
     }
 
+    /** Dev/demo hook: switch tab, search for items and select an item row, as a user would. */
+    public void demo(int tabIndex, String search, int itemIndex) {
+        tab = tabIndex;
+        if (search != null) searchBox.setValue(search);
+        if (pool() != null && itemIndex >= 0 && itemIndex < pool().items.size()) selItem = itemIndex;
+        refreshWidgets();
+    }
+
+    // ================================================================= scroll regions
+
+    /** {x, y, w, h, rowH, rows visible, total} of a scrollable list, or null when it isn't on screen. */
+    private int[] region(int id) {
+        return switch (id) {
+            case S_TYPES -> new int[]{left + 4, top + 20, LIST_W, typeRows * TYPE_ROW_H, TYPE_ROW_H, typeRows, types.size()};
+            case S_POOLS -> tab != TAB_POOLS ? null
+                    : new int[]{colAX, poolY, colAW, poolRows * POOL_ROW_H, POOL_ROW_H, poolRows, edit.pools.size()};
+            case S_ITEMS -> tab != TAB_POOLS || pool() == null ? null
+                    : new int[]{colBX, itemY, colBW, itemRows * ITEM_ROW_H, ITEM_ROW_H, itemRows, pool().items.size()};
+            case S_RESULTS -> tab != TAB_POOLS || pool() == null ? null
+                    : new int[]{colBX, resultY, colBW, resultRows * CELL, CELL, resultRows, (results.size() + resultCols - 1) / resultCols};
+            default -> null;
+        };
+    }
+
+    private static boolean inside(int[] r, double mx, double my) {
+        return r != null && mx >= r[0] && mx < r[0] + r[2] && my >= r[1] && my < r[1] + r[3];
+    }
+
+    /** True when the point is on the region's scrollbar strip (rightmost 4 px) and it can scroll. */
+    private static boolean onBar(int[] r, double mx, double my) {
+        return inside(r, mx, my) && r[6] > r[5] && mx >= r[0] + r[2] - 5;
+    }
+
+    private void dragTo(int id, double my) {
+        int[] r = region(id);
+        if (r == null || r[6] <= r[5]) return;
+        double f = Mth.clamp((my - r[1]) / r[3], 0, 1);
+        scroll[id] = clampScroll((int) Math.round(f * (r[6] - r[5])), r[6], r[5]);
+    }
+
+    private static int clampScroll(int v, int size, int visible) {
+        return Math.max(0, Math.min(v, size - visible));
+    }
+
+    private void drawScrollbar(GuiGraphics g, int id) {
+        int[] r = region(id);
+        if (r == null || r[6] <= r[5]) return;
+        int x = r[0] + r[2] - 3, y = r[1], h = r[3];
+        g.fill(x, y, x + 3, y + h, 0xFF15171B);
+        int thumb = Math.max(8, h * r[5] / r[6]);
+        int pos = (h - thumb) * scroll[id] / Math.max(1, r[6] - r[5]);
+        g.fill(x, y + pos, x + 3, y + pos + thumb, dragging == id ? C_ACCENT : 0xFF6A7080);
+    }
+
     // ================================================================= input
 
     @Override
     public boolean mouseClicked(double mx, double my, int button) {
         if (super.mouseClicked(mx, my, button)) return true;
         if (button != 0) return false;
-
-        // type list
-        int row = rowAt(mx, my, left + 6, top + 20, 100, TYPE_ROW_H, TYPE_ROWS);
-        if (row >= 0 && typeScroll + row < types.size()) {
-            clickType(types.get(typeScroll + row));
+        for (int id = 0; id < 4; id++) {
+            if (onBar(region(id), mx, my)) {
+                dragging = id;
+                dragTo(id, my);
+                return true;
+            }
+        }
+        int[] r = region(S_TYPES);
+        if (inside(r, mx, my)) {
+            int row = scroll[S_TYPES] + (int) ((my - r[1]) / TYPE_ROW_H);
+            if (row < types.size()) clickType(types.get(row));
             return true;
         }
-        if (styleTab) return false;
-        // pool list
-        row = rowAt(mx, my, midX, top + POOL_Y, 150, POOL_ROW_H, POOL_ROWS);
-        if (row >= 0 && poolScroll + row < edit.pools.size()) {
-            selPool = poolScroll + row;
-            selItem = -1;
-            itemScroll = 0;
-            refreshWidgets();
+        if (tab != TAB_POOLS) return false;
+        r = region(S_POOLS);
+        if (inside(r, mx, my)) {
+            int row = scroll[S_POOLS] + (int) ((my - r[1]) / POOL_ROW_H);
+            if (row < edit.pools.size()) {
+                selPool = row;
+                selItem = -1;
+                scroll[S_ITEMS] = 0;
+                refreshWidgets();
+            }
             return true;
         }
-        // item list
-        TicketType.Pool p = pool();
-        row = rowAt(mx, my, rightX, top + 20, 146, ITEM_ROW_H, ITEM_ROWS);
-        if (p != null && row >= 0 && itemScroll + row < p.items.size()) {
-            selItem = itemScroll + row;
-            refreshWidgets();
+        r = region(S_ITEMS);
+        if (inside(r, mx, my)) {
+            int row = scroll[S_ITEMS] + (int) ((my - r[1]) / ITEM_ROW_H);
+            if (row < pool().items.size()) {
+                selItem = row;
+                refreshWidgets();
+            }
             return true;
         }
-        // search results
         int ri = resultAt(mx, my);
-        if (p != null && ri >= 0) {
+        if (pool() != null && ri >= 0) {
             addItem(results.get(ri));
             return true;
         }
         return false;
     }
 
-    private static int rowAt(double mx, double my, int x, int y, int w, int rowH, int rows) {
-        if (mx < x || mx >= x + w || my < y || my >= y + rowH * rows) return -1;
-        return (int) ((my - y) / rowH);
+    @Override
+    public boolean mouseDragged(double mx, double my, int button, double dx, double dy) {
+        if (dragging >= 0) {
+            dragTo(dragging, my);
+            return true;
+        }
+        return super.mouseDragged(mx, my, button, dx, dy);
+    }
+
+    @Override
+    public boolean mouseReleased(double mx, double my, int button) {
+        if (dragging >= 0) {
+            dragging = -1;
+            return true;
+        }
+        return super.mouseReleased(mx, my, button);
     }
 
     private int resultAt(double mx, double my) {
-        int x0 = rightX + 1, y0 = top + 148;
-        if (mx < x0 || mx >= x0 + RESULT_COLS * 18 || my < y0 || my >= y0 + RESULT_ROWS * 18) return -1;
-        int i = (resultScroll + (int) ((my - y0) / 18)) * RESULT_COLS + (int) ((mx - x0) / 18);
+        int[] r = region(S_RESULTS);
+        if (!inside(r, mx, my) || mx >= colBX + resultCols * CELL) return -1;
+        int i = (scroll[S_RESULTS] + (int) ((my - resultY) / CELL)) * resultCols + (int) ((mx - colBX) / CELL);
         return i < results.size() ? i : -1;
     }
 
     @Override
     public boolean mouseScrolled(double mx, double my, double sx, double sy) {
         int d = sy > 0 ? -1 : 1;
-        if (mx >= left + 6 && mx < left + 106 && my >= top + 20 && my < top + 20 + TYPE_ROWS * TYPE_ROW_H) {
-            typeScroll = clampScroll(typeScroll + d, types.size(), TYPE_ROWS);
-        } else if (styleTab) {
-            return super.mouseScrolled(mx, my, sx, sy);
-        } else if (mx >= midX && mx < midX + 150 && my >= top + POOL_Y && my < top + POOL_Y + POOL_ROWS * POOL_ROW_H) {
-            poolScroll = clampScroll(poolScroll + d, edit.pools.size(), POOL_ROWS);
-        } else if (pool() != null && mx >= rightX && mx < rightX + 146 && my >= top + 20 && my < top + 20 + ITEM_ROWS * ITEM_ROW_H) {
-            itemScroll = clampScroll(itemScroll + d, pool().items.size(), ITEM_ROWS);
-        } else if (mx >= rightX && mx < rightX + 146 && my >= top + 148 && my < top + 148 + RESULT_ROWS * 18) {
-            int rows = (results.size() + RESULT_COLS - 1) / RESULT_COLS;
-            resultScroll = clampScroll(resultScroll + d, rows, RESULT_ROWS);
-        } else {
-            return super.mouseScrolled(mx, my, sx, sy);
+        for (int id = 0; id < 4; id++) {
+            int[] r = region(id);
+            if (inside(r, mx, my)) {
+                scroll[id] = clampScroll(scroll[id] + d, r[6], r[5]);
+                return true;
+            }
         }
-        return true;
-    }
-
-    private static int clampScroll(int v, int size, int visible) {
-        return Math.max(0, Math.min(v, size - visible));
+        return super.mouseScrolled(mx, my, sx, sy);
     }
 
     // ================================================================= rendering
@@ -532,9 +650,9 @@ public class TerminalScreen extends Screen {
         super.renderBackground(g, mouseX, mouseY, partialTick);
         g.fill(left - 1, top - 1, left + W + 1, top + H + 1, C_BORDER);
         g.fill(left, top, left + W, top + H, C_PANEL);
-        g.fill(left + 4, top + 4, left + 108, top + 210, C_COL);
-        g.fill(midX - 2, top + 4, midX + 152, top + 210, C_COL);
-        g.fill(rightX - 2, top + 4, rightX + 148, top + 210, C_COL);
+        g.fill(left + 2, top + 2, left + LIST_W + 6, top + H - 28, C_COL);
+        g.fill(cx, ct, cx + cw, cb, C_COL);
+        g.fill(cx, ct - 1, cx + cw, ct, C_ACCENT); // the active tab sits on this line
     }
 
     @Override
@@ -543,159 +661,224 @@ public class TerminalScreen extends Screen {
         ItemStack tooltip = ItemStack.EMPTY;
 
         // ---- left: types
-        g.drawString(font, Component.translatable("gui.lottery.terminal.types"), left + 8, top + 8, C_ACCENT, false);
-        for (int r = 0; r < TYPE_ROWS && typeScroll + r < types.size(); r++) {
-            TicketType t = types.get(typeScroll + r);
-            int y = top + 20 + r * TYPE_ROW_H;
-            if (t.id == edit.id) g.fill(left + 6, y, left + 106, y + TYPE_ROW_H, C_SEL);
-            g.fill(left + 8, y + 3, left + 14, y + 9, 0xFF000000 | TicketColors.of(t.id));
+        g.drawString(font, Component.translatable("gui.lottery.terminal.types"), left + 6, top + 8, C_ACCENT, false);
+        int[] tr = region(S_TYPES);
+        for (int r = 0; r < typeRows && scroll[S_TYPES] + r < types.size(); r++) {
+            TicketType t = types.get(scroll[S_TYPES] + r);
+            int y = tr[1] + r * TYPE_ROW_H;
+            if (t.id == edit.id) g.fill(left + 4, y, left + 4 + LIST_W, y + TYPE_ROW_H, C_SEL);
+            else if (inside(new int[]{left + 4, y, LIST_W, TYPE_ROW_H}, mouseX, mouseY)) g.fill(left + 4, y, left + 4 + LIST_W, y + TYPE_ROW_H, C_TAB_HOVER);
+            g.fill(left + 6, y + 3, left + 12, y + 9, 0xFF000000 | TicketColors.of(t.id));
             String label = "#" + t.id + " " + t.name;
-            g.drawString(font, font.plainSubstrByWidth(label, 88), left + 17, y + 2, t.enabled ? C_TEXT : C_DIM, false);
+            g.drawString(font, font.plainSubstrByWidth(label, LIST_W - 16), left + 15, y + 2, t.enabled ? C_TEXT : C_DIM, false);
         }
-        if (types.isEmpty()) g.drawString(font, Component.translatable("gui.lottery.terminal.no_types"), left + 8, top + 22, C_DIM, false);
+        if (types.isEmpty()) g.drawString(font, Component.translatable("gui.lottery.terminal.no_types"), left + 6, top + 22, C_DIM, false);
+        drawScrollbar(g, S_TYPES);
 
-        // ---- middle: settings
+        // ---- header right of the tabs
         Component header = edit.id > 0
-                ? Component.translatable("gui.lottery.terminal.editing", edit.id)
+                ? Component.translatable("gui.lottery.terminal.editing_named", edit.id, edit.name)
                 : Component.translatable("gui.lottery.terminal.unsaved_new");
-        g.drawString(font, header, midX, top + 8, C_ACCENT, false);
-        if (dirty) g.drawString(font, "*", midX + font.width(header) + 3, top + 8, C_BAD, false);
-        if (edit.id > 0) {
-            g.drawString(font, Component.translatable("gui.lottery.terminal.stats", edit.issued, edit.scratched, edit.wins),
-                    midX, top + 20, C_DIM, false);
-            if (edit.scratched > 0) {
-                g.drawString(font, Component.translatable("gui.lottery.terminal.actual_rate",
-                        pct((double) edit.wins / edit.scratched)), midX, top + 30, C_DIM, false);
-            }
-        }
-        g.drawString(font, Component.translatable("gui.lottery.terminal.name"), midX, top + 47, C_TEXT, false);
-        g.drawString(font, Component.translatable("gui.lottery.terminal.empty_weight"), midX, top + 65, C_TEXT, false);
-        long total = edit.totalWeight();
-        g.drawString(font, pct(total > 0 ? (double) edit.emptyWeight / total : 1), midX + 100, top + 65, C_DIM, false);
-        g.drawString(font, Component.translatable("gui.lottery.terminal.win_chance", pct(edit.winChance())),
-                midX + 64, top + 83, edit.winChance() > 0 ? C_ACCENT : C_BAD, false);
+        String hs = font.plainSubstrByWidth(header.getString(), cw - 220);
+        int hx = cx + cw - font.width(hs) - (dirty ? 8 : 2);
+        g.drawString(font, hs, hx, top + 11, C_ACCENT, false);
+        if (dirty) g.drawString(font, "*", cx + cw - 6, top + 11, C_BAD, false);
 
-        if (styleTab) {
-            renderStyleSettings(g);
-            renderPreview(g);
-        } else {
-            tooltip = renderPools(g, mouseX, mouseY, total);
+        switch (tab) {
+            case TAB_BASIC -> renderBasic(g);
+            case TAB_POOLS -> tooltip = renderPools(g, mouseX, mouseY);
+            case TAB_STYLE -> {
+                renderStyleSettings(g);
+                renderPreview(g);
+            }
         }
 
         // ---- bottom bar
-        g.drawString(font, Component.translatable("gui.lottery.terminal.count"), left + 8, top + 219, C_TEXT, false);
-        g.drawString(font, font.substrByWidth(status, W - 220).getString(), left + 216, top + 219, statusColor, false);
+        g.drawString(font, Component.translatable("gui.lottery.terminal.count"), left + W - 6 - 154 - font.width(
+                Component.translatable("gui.lottery.terminal.count")) - 4, top + H - 20, C_TEXT, false);
+        int statusW = W - LIST_W - 12 - 154 - 50;
+        g.drawString(font, Language.getInstance().getVisualOrder(font.substrByWidth(status, statusW)), cx, top + H - 20, statusColor, false);
 
         if (!tooltip.isEmpty()) g.renderTooltip(font, tooltip, mouseX, mouseY);
     }
 
-    /** Pools tab: pool list in the middle, items + search on the right. @return item to show a tooltip for */
-    private ItemStack renderPools(GuiGraphics g, int mouseX, int mouseY, long total) {
-        ItemStack tooltip = ItemStack.EMPTY;
-        for (int r = 0; r < POOL_ROWS && poolScroll + r < edit.pools.size(); r++) {
-            int pi = poolScroll + r;
-            TicketType.Pool p = edit.pools.get(pi);
-            int y = top + POOL_Y + r * POOL_ROW_H;
-            if (pi == selPool) g.fill(midX, y, midX + 150, y + POOL_ROW_H, C_SEL);
-            g.fill(midX + 2, y + 2, midX + 5, y + 9, 0xFF000000 | Tier.color(p.tier));
-            g.drawString(font, font.plainSubstrByWidth(p.name, 64), midX + 8, y + 2, C_TEXT, false);
-            g.drawString(font, "w" + p.weight, midX + 76, y + 2, C_DIM, false);
-            String share = p.usable() ? pct((double) p.weight / total) : Component.translatable("gui.lottery.terminal.pool_unused").getString();
-            g.drawString(font, share, midX + 148 - font.width(share), y + 2, p.usable() ? C_TEXT : C_BAD, false);
+    private void label(GuiGraphics g, String key, int x, int y) {
+        g.drawString(font, Component.translatable(key), x, y + 3, C_TEXT, false);
+    }
+
+    /** Basic tab: name / empty weight / enabled on the left, a summary card of the whole ticket on the right. */
+    private void renderBasic(GuiGraphics g) {
+        int x = cx + 6;
+        if (edit.id > 0) {
+            g.drawString(font, Component.translatable("gui.lottery.terminal.stats", edit.issued, edit.scratched, edit.wins), x, ct + 8, C_DIM, false);
+            if (edit.scratched > 0) {
+                Component rate = Component.translatable("gui.lottery.terminal.actual_rate", pct((double) edit.wins / edit.scratched));
+                g.drawString(font, rate, x, ct + 18, C_DIM, false);
+            }
+        } else {
+            g.drawString(font, Component.translatable("gui.lottery.terminal.new_hint"), x, ct + 8, C_DIM, false);
         }
-        if (edit.pools.isEmpty()) g.drawString(font, Component.translatable("gui.lottery.terminal.no_pools"), midX + 2, top + POOL_Y + 2, C_DIM, false);
+        label(g, "gui.lottery.terminal.name", x, ct + 30);
+        label(g, "gui.lottery.terminal.empty_weight", x, ct + 50);
+        long total = edit.totalWeight();
+        g.drawString(font, pct(total > 0 ? (double) edit.emptyWeight / total : 1), cx + 120, ct + 53, C_DIM, false);
+        label(g, "gui.lottery.terminal.state", x, ct + 70);
+
+        // summary card
+        int sx = cx + cw / 2 + 4, sw = cw / 2 - 10, sy = ct + 6, sh = cb - ct - 12;
+        g.fill(sx, sy, sx + sw, sy + sh, C_INSET);
+        g.fill(sx, sy, sx + 3, sy + sh, 0xFF000000 | TicketColors.of(edit.id));
+        int ly = sy + 6, lx = sx + 8;
+        g.drawString(font, Component.translatable("gui.lottery.terminal.summary"), lx, ly, C_ACCENT, false);
+        ly += 14;
+        PlayStyle s = edit.playStyle();
+        int draws = Math.max(1, Math.min(edit.draws, edit.maxDraws()));
+        Component layout = switch (s) {
+            case MATCH -> Component.translatable("gui.lottery.terminal.sum_match", edit.cols, edit.rows, edit.winCount);
+            case CASE -> Component.translatable("gui.lottery.terminal.sum_case", edit.spinSeconds);
+            case CARDS -> Component.translatable("gui.lottery.terminal.sum_cards", edit.cardCols);
+        };
+        ly = summaryLine(g, Component.translatable("gui.lottery.terminal.sum_style", s.label(), draws), lx, ly, sw, C_TEXT);
+        ly = summaryLine(g, layout, lx, ly, sw, C_DIM);
+        int usable = 0;
+        for (TicketType.Pool p : edit.pools) if (p.usable()) usable++;
+        ly = summaryLine(g, Component.translatable("gui.lottery.terminal.sum_pools", edit.pools.size(), usable), lx, ly, sw,
+                usable > 0 ? C_TEXT : C_BAD);
+        ly += 4;
+        ly = summaryLine(g, Component.translatable("gui.lottery.terminal.p_draw", pct(edit.winChance())), lx, ly, sw, C_TEXT);
+        TicketType probe = edit.copy();
+        probe.draws = draws;
+        ly = summaryLine(g, Component.translatable("gui.lottery.terminal.p_ticket", pct(probe.ticketWinChance())), lx, ly, sw, C_ACCENT);
+        ly += 4;
+        Component pity = edit.pityCount > 0
+                ? Component.translatable("gui.lottery.terminal.i_pity", edit.pityCount, Tier.name(edit.pityTier))
+                : Component.translatable("gui.lottery.terminal.sum_no_pity");
+        ly = summaryLine(g, pity, lx, ly, sw, C_DIM);
+        if (edit.guaranteeTier >= 0) {
+            summaryLine(g, Component.translatable("gui.lottery.terminal.i_guarantee", Tier.name(edit.guaranteeTier)), lx, ly, sw, C_DIM);
+        }
+    }
+
+    private int summaryLine(GuiGraphics g, Component text, int x, int y, int w, int color) {
+        g.drawString(font, Language.getInstance().getVisualOrder(font.substrByWidth(text, w - 14)), x, y, color, false);
+        return y + 11;
+    }
+
+    /** Pools tab: pool list + editor on the left, items + editor + search on the right. @return tooltip item */
+    private ItemStack renderPools(GuiGraphics g, int mouseX, int mouseY) {
+        ItemStack tooltip = ItemStack.EMPTY;
+        long total = edit.totalWeight();
+        g.drawString(font, Component.translatable("gui.lottery.terminal.pools"), colAX, ct + 6, C_ACCENT, false);
+        g.fill(colAX, poolY, colAX + colAW, poolY + poolRows * POOL_ROW_H, C_INSET);
+        for (int r = 0; r < poolRows && scroll[S_POOLS] + r < edit.pools.size(); r++) {
+            int pi = scroll[S_POOLS] + r;
+            TicketType.Pool p = edit.pools.get(pi);
+            int y = poolY + r * POOL_ROW_H;
+            if (pi == selPool) g.fill(colAX, y, colAX + colAW, y + POOL_ROW_H, C_SEL);
+            g.fill(colAX + 2, y + 2, colAX + 5, y + 10, 0xFF000000 | Tier.color(p.tier));
+            String share = p.usable() ? pct1((double) p.weight / total) : Component.translatable("gui.lottery.terminal.pool_unused").getString();
+            int shareW = font.width(share);
+            g.drawString(font, font.plainSubstrByWidth(p.name, colAW - shareW - 40), colAX + 8, y + 2, C_TEXT, false);
+            g.drawString(font, "w" + p.weight, colAX + colAW - shareW - 36, y + 2, C_DIM, false);
+            g.drawString(font, share, colAX + colAW - 6 - shareW, y + 2, p.usable() ? C_TEXT : C_BAD, false);
+        }
+        if (edit.pools.isEmpty()) g.drawString(font, Component.translatable("gui.lottery.terminal.no_pools"), colAX + 4, poolY + 3, C_DIM, false);
+        drawScrollbar(g, S_POOLS);
         if (pool() != null) {
-            g.drawString(font, Component.translatable("gui.lottery.terminal.pool_name_label"), midX, top + 173, C_TEXT, false);
-            g.drawString(font, Component.translatable("gui.lottery.terminal.weight"), midX + 92, top + 173, C_TEXT, false);
-            g.drawString(font, Component.translatable("gui.lottery.terminal.tier"), midX, top + 189, C_TEXT, false);
+            label(g, "gui.lottery.terminal.pool_name_label", colAX, cb - 48);
+            label(g, "gui.lottery.terminal.weight", colAX, cb - 32);
+            label(g, "gui.lottery.terminal.tier", colAX, cb - 16);
         }
 
         TicketType.Pool p = pool();
         if (p == null) {
-            g.drawString(font, Component.translatable("gui.lottery.terminal.select_pool"), rightX, top + 8, C_DIM, false);
+            g.drawString(font, Component.translatable("gui.lottery.terminal.select_pool"), colBX, ct + 6, C_DIM, false);
             return tooltip;
         }
-        g.drawString(font, font.plainSubstrByWidth(Component.translatable("gui.lottery.terminal.pool_items", p.name).getString(), 146),
-                rightX, top + 8, C_ACCENT, false);
+        g.drawString(font, font.plainSubstrByWidth(Component.translatable("gui.lottery.terminal.pool_items", p.name).getString(), colBW),
+                colBX, ct + 6, C_ACCENT, false);
+        g.fill(colBX, itemY, colBX + colBW, itemY + itemRows * ITEM_ROW_H, C_INSET);
         long itemTotal = p.totalItemWeight();
-        for (int r = 0; r < ITEM_ROWS && itemScroll + r < p.items.size(); r++) {
-            int ii = itemScroll + r;
+        for (int r = 0; r < itemRows && scroll[S_ITEMS] + r < p.items.size(); r++) {
+            int ii = scroll[S_ITEMS] + r;
             TicketType.PoolItem it = p.items.get(ii);
-            int y = top + 20 + r * ITEM_ROW_H;
-            if (ii == selItem) g.fill(rightX, y, rightX + 146, y + ITEM_ROW_H, C_SEL);
-            g.renderItem(it.item, rightX + 1, y + 1);
-            g.drawString(font, font.plainSubstrByWidth(it.item.getHoverName().getString(), 48), rightX + 20, y + 5, C_TEXT, false);
-            String range = it.min == it.max ? "×" + it.min : it.min + "~" + it.max;
-            g.drawString(font, range, rightX + 70, y + 5, it.min > it.max ? C_BAD : C_DIM, false);
+            int y = itemY + r * ITEM_ROW_H;
+            if (ii == selItem) g.fill(colBX, y, colBX + colBW, y + ITEM_ROW_H, C_SEL);
+            g.renderItem(it.item, colBX + 1, y + 1);
             String share = it.usable() && itemTotal > 0 ? pct1((double) it.weight / itemTotal) : "0%";
-            g.drawString(font, share, rightX + 145 - font.width(share), y + 5, C_TEXT, false);
-            if (mouseX >= rightX + 1 && mouseX < rightX + 17 && mouseY >= y + 1 && mouseY < y + 17) tooltip = it.item;
+            String range = it.min == it.max ? "×" + it.min : it.min + "~" + it.max;
+            int shareW = font.width(share);
+            int rangeX = colBX + colBW - shareW - 12 - font.width(range);
+            g.drawString(font, font.plainSubstrByWidth(it.item.getHoverName().getString(), rangeX - colBX - 24), colBX + 20, y + 5, C_TEXT, false);
+            g.drawString(font, range, rangeX, y + 5, it.min > it.max ? C_BAD : C_DIM, false);
+            g.drawString(font, share, colBX + colBW - 6 - shareW, y + 5, C_TEXT, false);
+            if (mouseX >= colBX + 1 && mouseX < colBX + 17 && mouseY >= y + 1 && mouseY < y + 17) tooltip = it.item;
         }
-        if (p.items.isEmpty()) g.drawString(font, Component.translatable("gui.lottery.terminal.no_items"), rightX + 2, top + 24, C_DIM, false);
+        if (p.items.isEmpty()) g.drawString(font, Component.translatable("gui.lottery.terminal.no_items"), colBX + 4, itemY + 5, C_DIM, false);
+        drawScrollbar(g, S_ITEMS);
         TicketType.PoolItem it = item();
         if (it != null) {
-            g.drawString(font, Component.translatable("gui.lottery.terminal.weight"), rightX, top + 99, C_TEXT, false);
-            double overall = total > 0 && p.usable() && itemTotal > 0
-                    ? (double) p.weight / total * it.weight / itemTotal : 0;
-            g.drawString(font, Component.translatable("gui.lottery.terminal.overall", pct(overall)), rightX + 70, top + 99, C_DIM, false);
-            g.drawString(font, Component.translatable("gui.lottery.terminal.amount"), rightX, top + 115, C_TEXT, false);
-            g.drawString(font, "~", rightX + 62, top + 115, C_TEXT, false);
+            label(g, "gui.lottery.terminal.weight", colBX, itemEditY);
+            double overall = total > 0 && p.usable() && itemTotal > 0 ? (double) p.weight / total * it.weight / itemTotal : 0;
+            g.drawString(font, Component.translatable("gui.lottery.terminal.overall", pct(overall)), colBX + 80, itemEditY + 3, C_DIM, false);
+            label(g, "gui.lottery.terminal.amount", colBX, itemEditY + 16);
+            g.drawString(font, "~", colBX + 69, itemEditY + 19, C_TEXT, false);
+        } else {
+            g.drawString(font, Component.translatable("gui.lottery.terminal.pick_item"), colBX, itemEditY + 3, C_DIM, false);
         }
+
         // search results
-        int x0 = rightX + 1, y0 = top + 148;
-        g.fill(x0 - 1, y0 - 1, x0 + RESULT_COLS * 18, y0 + RESULT_ROWS * 18, 0xFF1A1D22);
-        for (int i = 0; i < RESULT_COLS * RESULT_ROWS; i++) {
-            int idx = resultScroll * RESULT_COLS + i;
+        int gw = resultCols * CELL;
+        g.fill(colBX, resultY, colBX + colBW, resultY + resultRows * CELL, C_INSET);
+        for (int i = 0; i < resultCols * resultRows; i++) {
+            int idx = scroll[S_RESULTS] * resultCols + i;
             if (idx >= results.size()) break;
-            int x = x0 + (i % RESULT_COLS) * 18, y = y0 + (i / RESULT_COLS) * 18;
-            boolean hover = mouseX >= x && mouseX < x + 18 && mouseY >= y && mouseY < y + 18;
+            int x = colBX + (i % resultCols) * CELL, y = resultY + (i / resultCols) * CELL;
+            boolean hover = mouseX >= x && mouseX < x + CELL && mouseY >= y && mouseY < y + CELL && mouseX < colBX + gw;
             if (hover) {
-                g.fill(x, y, x + 18, y + 18, C_SEL);
+                g.fill(x, y, x + CELL, y + CELL, C_SEL);
                 tooltip = results.get(idx);
             }
             g.renderItem(results.get(idx), x + 1, y + 1);
         }
         if (results.isEmpty()) {
             g.drawString(font, Component.translatable(searchBox.getValue().isBlank()
-                    ? "gui.lottery.terminal.search_hint" : "gui.lottery.terminal.search_none"), x0 + 2, y0 + 4, C_DIM, false);
-        } else if (results.size() > RESULT_COLS * RESULT_ROWS) {
-            g.drawString(font, Component.translatable("gui.lottery.terminal.results", results.size()), x0, y0 + 38, C_DIM, false);
+                    ? "gui.lottery.terminal.search_hint" : "gui.lottery.terminal.search_none"), colBX + 4, resultY + 5, C_DIM, false);
         }
+        drawScrollbar(g, S_RESULTS);
         return tooltip;
     }
 
     /** Labels of the style tab (the inputs themselves are widgets). */
     private void renderStyleSettings(GuiGraphics g) {
+        int sx = colAX, r0 = ct + 22;
+        g.drawString(font, Component.translatable("gui.lottery.terminal.tab_style"), sx, ct + 6, C_ACCENT, false);
         PlayStyle s = edit.playStyle();
-        label(g, "gui.lottery.terminal.style", midX, S_STYLE);
-        label(g, "gui.lottery.terminal.draws", midX, S_DRAWS);
+        label(g, "gui.lottery.terminal.style", sx, r0);
+        label(g, "gui.lottery.terminal.draws", sx, r0 + 18);
+        g.drawString(font, Component.translatable("gui.lottery.terminal.max_draws", edit.maxDraws()), sx + 72, r0 + 21, C_DIM, false);
         switch (s) {
             case MATCH -> {
-                label(g, "gui.lottery.terminal.win_numbers", midX + 58, S_DRAWS);
-                label(g, "gui.lottery.terminal.grid", midX, S_LAYOUT);
-                g.drawString(font, "×", midX + 53, top + S_LAYOUT + 3, C_TEXT, false);
-                label(g, "gui.lottery.terminal.range", midX, S_EXTRA);
-                g.drawString(font, Component.translatable("gui.lottery.terminal.range_hint"), midX + 82, top + S_EXTRA + 3, C_DIM, false);
+                label(g, "gui.lottery.terminal.win_numbers", sx + 100, r0 + 18);
+                label(g, "gui.lottery.terminal.grid", sx, r0 + 36);
+                g.drawString(font, "×", sx + 70, r0 + 39, C_TEXT, false);
+                label(g, "gui.lottery.terminal.range", sx, r0 + 54);
+                g.drawString(font, Component.translatable("gui.lottery.terminal.range_hint"), sx + 90, r0 + 57, C_DIM, false);
             }
-            case CASE -> label(g, "gui.lottery.terminal.spin", midX, S_LAYOUT);
-            case CARDS -> label(g, "gui.lottery.terminal.per_row", midX, S_LAYOUT);
+            case CASE -> label(g, "gui.lottery.terminal.spin", sx, r0 + 36);
+            case CARDS -> label(g, "gui.lottery.terminal.per_row", sx, r0 + 36);
         }
-        g.drawString(font, Component.translatable("gui.lottery.terminal.max_draws", edit.maxDraws()), midX + (s == PlayStyle.MATCH ? 124 : 58),
-                top + S_DRAWS + 3, C_DIM, false);
-        label(g, "gui.lottery.terminal.pity", midX, S_PITY);
-        label(g, "gui.lottery.terminal.pity_mid", midX + 60, S_PITY);
-        label(g, "gui.lottery.terminal.guarantee", midX, S_GUAR);
-    }
-
-    private void label(GuiGraphics g, String key, int x, int rowY) {
-        g.drawString(font, Component.translatable(key), x, top + rowY + 3, C_TEXT, false);
+        g.fill(sx, r0 + 74, sx + 160, r0 + 75, C_BORDER);
+        label(g, "gui.lottery.terminal.pity", sx, r0 + 80);
+        label(g, "gui.lottery.terminal.pity_mid", sx + 76, r0 + 80);
+        label(g, "gui.lottery.terminal.guarantee", sx, r0 + 98);
     }
 
     /** Style tab, right column: a miniature of the ticket and what the settings mean. */
     private void renderPreview(GuiGraphics g) {
-        g.drawString(font, Component.translatable("gui.lottery.terminal.preview"), rightX, top + 8, C_ACCENT, false);
-        int x0 = rightX, y0 = top + 20, pw = 146, ph = 76;
-        g.fill(x0, y0, x0 + pw, y0 + ph, 0xFF1A1D22);
+        int x0 = colBX, pw = colBW, ph = previewH, y0 = previewY;
+        g.drawString(font, Component.translatable("gui.lottery.terminal.preview"), x0, ct + 6, C_ACCENT, false);
+        g.fill(x0, y0, x0 + pw, y0 + ph, C_INSET);
         PlayStyle s = edit.playStyle();
         int color = 0xFF000000 | TicketColors.of(edit.id);
         int draws = Math.max(1, Math.min(edit.draws, edit.maxDraws()));
@@ -703,85 +886,79 @@ public class TerminalScreen extends Screen {
             case MATCH -> {
                 int cols = clamp(edit.cols, 1, TicketType.MAX_COLS), rows = clamp(edit.rows, 1, TicketType.MAX_ROWS);
                 int wc = clamp(edit.winCount, 1, TicketType.MAX_WIN_NUMBERS);
-                int ww = wc * 12 - 2;
+                int ww = wc * 14 - 2;
                 for (int i = 0; i < wc; i++) {
-                    int x = x0 + (pw - ww) / 2 + i * 12;
-                    g.fill(x, y0 + 4, x + 10, y0 + 11, 0xFFC9A44A);
+                    int x = x0 + (pw - ww) / 2 + i * 14;
+                    g.fill(x, y0 + 5, x + 12, y0 + 13, 0xFFC9A44A);
                 }
-                int bw = Math.min(14, (pw - 8 - (cols - 1) * 2) / cols), bh = Math.min(10, (ph - 18 - (rows - 1) * 2) / rows);
+                int bw = Math.min(18, (pw - 10 - (cols - 1) * 2) / cols), bh = Math.min(14, (ph - 24 - (rows - 1) * 2) / rows);
                 int gw = cols * (bw + 2) - 2;
                 for (int r = 0; r < rows; r++) {
                     for (int c = 0; c < cols; c++) {
-                        int x = x0 + (pw - gw) / 2 + c * (bw + 2), y = y0 + 15 + r * (bh + 2);
+                        int x = x0 + (pw - gw) / 2 + c * (bw + 2), y = y0 + 18 + r * (bh + 2);
                         g.fill(x, y, x + bw, y + bh, 0xFFC1C1CA);
                     }
                 }
             }
             case CASE -> {
-                int rh = Math.min(12, (ph - 8 - (draws - 1) * 3) / draws);
+                int rh = Math.min(16, (ph - 10 - (draws - 1) * 4) / draws);
+                int tiles = (pw - 12) / 17;
                 for (int i = 0; i < draws; i++) {
-                    int y = y0 + 4 + i * (rh + 3);
+                    int y = y0 + 5 + i * (rh + 4);
                     g.fill(x0 + 4, y, x0 + pw - 4, y + rh, 0xFF2C3038);
-                    for (int k = 0; k < 9; k++) {
-                        int tx = x0 + 8 + k * 15;
+                    for (int k = 0; k < tiles; k++) {
+                        int tx = x0 + 7 + k * 17;
                         int tier = (k * 7 + i * 3) % Tier.COUNT;
-                        g.fill(tx, y + 1, tx + 12, y + rh - 1, 0xFF000000 | Tier.color(Math.min(tier, 2)));
+                        g.fill(tx, y + 2, tx + 14, y + rh - 2, 0xFF000000 | Tier.color(Math.min(tier, 2)));
                     }
-                    g.fill(x0 + pw / 2 - 1, y - 1, x0 + pw / 2 + 1, y + rh + 1, C_ACCENT);
+                    g.fill(x0 + pw / 2 - 1, y - 2, x0 + pw / 2 + 1, y + rh + 2, C_ACCENT);
                 }
             }
             case CARDS -> {
-                int per = clamp(edit.cardCols, 1, TicketType.MAX_COLS);
-                per = Math.min(per, draws);
+                int per = Math.min(clamp(edit.cardCols, 1, TicketType.MAX_COLS), draws);
                 int rows = (draws + per - 1) / per;
-                int ch = Math.min(28, (ph - 8 - (rows - 1) * 3) / rows), cw = ch * 3 / 4;
+                int ch = Math.min(40, (ph - 10 - (rows - 1) * 4) / rows), cwd = ch * 3 / 4;
                 for (int i = 0; i < draws; i++) {
                     int r = i / per, c = i % per;
                     int inRow = Math.min(per, draws - r * per);
-                    int x = x0 + (pw - (inRow * (cw + 3) - 3)) / 2 + c * (cw + 3), y = y0 + 4 + r * (ch + 3);
-                    g.fill(x, y, x + cw, y + ch, color);
-                    g.fill(x + 2, y + 2, x + cw - 2, y + ch - 2, 0xFF000000 | TicketColors.dark(edit.id));
+                    int x = x0 + (pw - (inRow * (cwd + 4) - 4)) / 2 + c * (cwd + 4), y = y0 + 5 + r * (ch + 4);
+                    g.fill(x, y, x + cwd, y + ch, color);
+                    g.fill(x + 2, y + 2, x + cwd - 2, y + ch - 2, 0xFF000000 | TicketColors.dark(edit.id));
                 }
             }
         }
 
-        // numbers
-        int y = y0 + ph + 4;
-        line(g, Component.translatable("gui.lottery.terminal.p_draw", pct(edit.winChance())), y, C_TEXT);
-        y += 10;
+        int y = y0 + ph + 6;
+        y = previewLine(g, Component.translatable("gui.lottery.terminal.p_draw", pct(edit.winChance())), y, C_TEXT);
         TicketType probe = edit.copy();
         probe.draws = draws;
-        line(g, Component.translatable("gui.lottery.terminal.p_ticket", pct(probe.ticketWinChance())), y, C_TEXT);
-        y += 10;
-        line(g, Component.translatable("gui.lottery.terminal.p_expect", String.format(Locale.ROOT, "%.2f", draws * edit.winChance())), y, C_DIM);
-        y += 10;
+        y = previewLine(g, Component.translatable("gui.lottery.terminal.p_ticket", pct(probe.ticketWinChance())), y, C_ACCENT);
+        y = previewLine(g, Component.translatable("gui.lottery.terminal.p_expect", String.format(Locale.ROOT, "%.2f", draws * edit.winChance())), y, C_DIM);
         if (edit.draws > edit.maxDraws()) {
-            line(g, Component.translatable("gui.lottery.terminal.w_draws", edit.maxDraws()), y, C_BAD);
-            y += 10;
+            y = previewLine(g, Component.translatable("gui.lottery.terminal.w_draws", edit.maxDraws()), y, C_BAD);
         }
         if (s == PlayStyle.MATCH && edit.numberRange > 0 && edit.numberRange < edit.neededRange()) {
-            line(g, Component.translatable("gui.lottery.terminal.w_range", edit.neededRange()), y, C_BAD);
-            y += 10;
+            y = previewLine(g, Component.translatable("gui.lottery.terminal.w_range", edit.neededRange()), y, C_BAD);
         }
         if (edit.pityCount > 0) {
             boolean ok = edit.hasTierAtLeast(edit.pityTier);
-            line(g, ok ? Component.translatable("gui.lottery.terminal.i_pity", edit.pityCount, Tier.name(edit.pityTier))
+            y = previewLine(g, ok ? Component.translatable("gui.lottery.terminal.i_pity", edit.pityCount, Tier.name(edit.pityTier))
                     : Component.translatable("gui.lottery.terminal.w_no_tier", Tier.name(edit.pityTier)), y, ok ? C_DIM : C_BAD);
-            y += 10;
         }
         if (edit.guaranteeTier >= 0) {
             boolean ok = edit.hasTierAtLeast(edit.guaranteeTier);
             Component c = !ok ? Component.translatable("gui.lottery.terminal.w_no_tier", Tier.name(edit.guaranteeTier))
                     : draws <= 1 ? Component.translatable("gui.lottery.terminal.w_single")
                     : Component.translatable("gui.lottery.terminal.i_guarantee", Tier.name(edit.guaranteeTier));
-            line(g, c, y, ok && draws > 1 ? C_DIM : C_BAD);
+            previewLine(g, c, y, ok && draws > 1 ? C_DIM : C_BAD);
         }
     }
 
-    private void line(GuiGraphics g, Component text, int y, int color) {
+    private int previewLine(GuiGraphics g, Component text, int y, int color) {
+        if (y + 9 > cb) return y;
         // keep the tier colours inside the text while still clipping to the column
-        g.drawString(font, net.minecraft.locale.Language.getInstance().getVisualOrder(font.substrByWidth(text, 146)),
-                rightX, y, color, false);
+        g.drawString(font, Language.getInstance().getVisualOrder(font.substrByWidth(text, colBW)), colBX, y, color, false);
+        return y + 11;
     }
 
     private static int clamp(int v, int lo, int hi) {
@@ -799,5 +976,29 @@ public class TerminalScreen extends Screen {
     @Override
     public boolean isPauseScreen() {
         return false;
+    }
+
+    /** Flat tab: the active one is lit and joins the content panel below it. */
+    private class TabButton extends Button {
+        private final int index;
+
+        TabButton(int x, int y, int w, int h, Component text, int index, OnPress press) {
+            super(x, y, w, h, text, press, DEFAULT_NARRATION);
+            this.index = index;
+        }
+
+        @Override
+        protected void renderWidget(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
+            boolean active = tab == index;
+            int bg = active ? C_COL : isHovered() ? C_TAB_HOVER : C_TAB;
+            g.fill(getX(), getY(), getX() + width, getY() + height, bg);
+            if (active) {
+                g.fill(getX(), getY(), getX() + width, getY() + 2, C_ACCENT);
+                g.fill(getX(), getY() + height - 1, getX() + width, getY() + height + 1, C_COL); // break the accent line
+            }
+            Component text = getMessage();
+            g.drawString(font, text, getX() + (width - font.width(text)) / 2, getY() + (height - 8) / 2 + 1,
+                    active ? C_ACCENT : isHovered() ? C_TEXT : C_DIM, false);
+        }
     }
 }

@@ -121,12 +121,113 @@ public class ScratchScreen extends PlayScreen {
         for (int i = winCount; i < cellCount(); i++) if (drawAt(i) != null) burst(i, 30);
     }
 
+    @Override
+    protected int summaryDelay() {
+        return STAMP_DELAY + STAMP_FALL + 18; // let the stamp land and be seen first
+    }
+
+    @Override
+    public void tick() {
+        super.tick();
+        if (finished && ticks - finishedAt == STAMP_DELAY + STAMP_FALL) {
+            play(SoundEvents.ANVIL_LAND, round.won() ? 1.7F : 1.4F, 0.25F);
+            int cx = left + panelW / 2, cy = stampCenterY();
+            burstAt(cx - 30, cy - 30, 60, 60, round.won() ? 24 : 8, round.won() ? 0xD03030 : 0x808080);
+        }
+    }
+
+    // ------------------------------------------------------------------ finale: links and stamp
+
+    private static final int STAMP_DELAY = 6, STAMP_FALL = 5;
+
+    /** Winning-number cell index (0..winCount-1) showing the same number as board cell {@code i}, or -1. */
+    private int winningCellFor(int i) {
+        int v = round.board[i - winCount];
+        for (int w = 0; w < winCount; w++) if (round.winning[w] == v) return w;
+        return -1;
+    }
+
+    /** Dashed, slowly flowing lines from each revealed prize cell up to its winning number. */
+    private void drawLinks(GuiGraphics g, float pt) {
+        g.pose().pushPose();
+        g.pose().translate(0, 0, 220);
+        float flow = (ticks + pt) * 0.6F;
+        for (int i = winCount; i < cellCount(); i++) {
+            Draw d = drawAt(i);
+            if (d == null || !isRevealed(i)) continue;
+            int w = winningCellFor(i);
+            if (w < 0 || !isRevealed(w)) continue;
+            int[] a = cellRect(w), b = cellRect(i);
+            float x0 = left + a[0] + a[2] / 2F, y0 = top + a[1] + a[3];
+            float x1 = left + b[0] + b[2] / 2F, y1 = top + b[1];
+            int color = 0xFF000000 | Tier.color(d.tier());
+            float len = (float) Math.hypot(x1 - x0, y1 - y0);
+            for (float s = 0; s < len; s += 2) {
+                if (((s + flow) % 8) >= 5) continue; // dash pattern
+                float f = s / len;
+                int x = Math.round(x0 + (x1 - x0) * f), y = Math.round(y0 + (y1 - y0) * f);
+                g.fill(x - 1, y - 1, x + 1, y + 1, color);
+            }
+            // matching winning number gets the prize colour too
+            g.renderOutline(left + a[0] - 2, top + a[1] - 2, a[2] + 4, a[3] + 4, color);
+        }
+        g.pose().popPose();
+    }
+
+    private int stampCenterY() {
+        int gridH = rows * cellH + (rows - 1) * cellGap;
+        return top + GRID_Y + gridH / 2;
+    }
+
+    /** A rubber stamp ("中奖" red / "未中奖" grey) that slams onto the ticket when it is finished. */
+    private void drawStamp(GuiGraphics g, float pt) {
+        if (!finished) return;
+        float t = ticks - finishedAt + pt - STAMP_DELAY;
+        if (t <= 0) return;
+        float fall = Mth.clamp(t / STAMP_FALL, 0, 1);
+        float scale = 2.6F - 1.6F * fall * fall;
+        boolean won = round.won();
+        int color = won ? 0xD03030 : 0x8A8A8A;
+        int alpha = (int) (Mth.clamp(fall * 1.5F, 0, 1) * (won ? 215 : 170));
+        int argb = (alpha << 24) | color;
+        int radius = Mth.clamp(Math.min(rows * cellH, panelW / 3) / 2 + 6, 22, 36);
+
+        g.pose().pushPose();
+        g.pose().translate(left + panelW / 2F, stampCenterY(), 260);
+        g.pose().mulPose(com.mojang.math.Axis.ZP.rotationDegrees(-14));
+        g.pose().scale(scale, scale, 1);
+        ring(g, radius, 3, argb);
+        ring(g, radius - 6, 1, argb);
+        Component text = Component.translatable(won ? "gui.lottery.stamp.won" : "gui.lottery.stamp.lost");
+        float ts = Math.max(1, (radius - 8) * 2F / Math.max(1, font.width(text)));
+        ts = Math.min(ts, 2.4F);
+        g.pose().scale(ts, ts, 1);
+        g.drawString(font, text, -font.width(text) / 2, -4, argb, false);
+        g.pose().popPose();
+    }
+
+    /** A circle outline centred on the origin, built from one-pixel rows. */
+    private static void ring(GuiGraphics g, int r, int thickness, int argb) {
+        int inner = r - thickness;
+        for (int dy = -r; dy < r; dy++) {
+            float yc = dy + 0.5F;
+            int xo = (int) Math.round(Math.sqrt(Math.max(0, r * r - yc * yc)));
+            if (Math.abs(yc) < inner) {
+                int xi = (int) Math.round(Math.sqrt(inner * inner - yc * yc));
+                g.fill(-xo, dy, -xi, dy + 1, argb);
+                g.fill(xi, dy, xo, dy + 1, argb);
+            } else {
+                g.fill(-xo, dy, xo, dy + 1, argb);
+            }
+        }
+    }
+
     // ------------------------------------------------------------------ input
 
     @Override
     public boolean mouseClicked(double mx, double my, int button) {
         if (super.mouseClicked(mx, my, button)) return true;
-        if (button == 0 && !finished) {
+        if (button == 0 && !finished && !introPlaying()) {
             dragging = true;
             pressX = lastX = mx;
             pressY = lastY = my;
@@ -193,9 +294,12 @@ public class ScratchScreen extends PlayScreen {
                         cleared[i][idx] = true;
                         clearedCount[i]++;
                         any = true;
-                        if (rnd.nextInt(6) == 0) {
+                        if (rnd.nextInt(3) == 0) {
+                            // flakes of the coating fly off the brush and fall
+                            int c = coatColor(i, cx, cy) & 0xFFFFFF;
+                            int life = 14 + rnd.nextInt(10);
                             particles.add(new Particle(left + r[0] + cx * PIX, top + r[1] + cy * PIX,
-                                    rnd.nextGaussian() * 0.8, -rnd.nextDouble() * 1.5, 12, 12, 0xC1C1CA, 1 + rnd.nextInt(2)));
+                                    rnd.nextGaussian() * 1.4, -0.5 - rnd.nextDouble() * 2.2, life, life, c, 1 + rnd.nextInt(3)));
                         }
                     }
                 }
@@ -225,10 +329,8 @@ public class ScratchScreen extends PlayScreen {
     }
 
     @Override
-    public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
-        super.render(g, mouseX, mouseY, partialTick);
-        g.drawString(font, Component.translatable("gui.lottery.scratch.title", round.typeName), left + 8, top + 6, 0xFFFFFFFF, true);
-        g.drawString(font, Component.translatable("gui.lottery.scratch.sub", round.typeId, stock), left + 8, top + 18, 0xFFF0F0F0, false);
+    protected void renderContent(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
+        titleBar(g, Component.translatable("gui.lottery.scratch.title", round.typeName));
 
         centered(g, Component.translatable("gui.lottery.scratch.winning_numbers"), top + WIN_Y - 10, 0xFF6A6050);
         if (finished) {
@@ -238,7 +340,8 @@ public class ScratchScreen extends PlayScreen {
         }
 
         for (int i = 0; i < cellCount(); i++) drawCell(g, i, mouseX, mouseY);
-        renderParticles(g);
+        drawLinks(g, partialTick);
+        drawStamp(g, partialTick);
 
         int noteY = top + panelH - 36;
         if (waiting) {
