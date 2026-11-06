@@ -26,11 +26,18 @@ public class SummonScreen extends Screen {
 
     private final Payloads.HubState state;
     private final int best;
+    /** One meteor per draw (rarest first); tier -2 = decorative companion for single pulls. */
     private final List<Integer> meteorTiers = new ArrayList<>();
-    private final float[] startX, startY, endX;
+    /**
+     * Per meteor, in units of the screen's half-diagonal around the impact point: start angle (radians), start
+     * distance, and the swirl (how far the curve bends sideways; same sign for all = a vortex).
+     */
+    private final float[] angle, dist, swirl;
     private final long seed;
     private int ticks;
     private boolean done;
+
+    private static final int COMPANION = -2;
 
     public SummonScreen(Payloads.HubState state) {
         super(Component.translatable("gui.lottery.summon"));
@@ -39,19 +46,36 @@ public class SummonScreen extends Screen {
         for (Draw d : state.round().draws) tiers.add(d.won() ? d.tier() : Tier.NONE);
         tiers.sort((a, b) -> Integer.compare(b, a));
         best = tiers.isEmpty() ? Tier.NONE : tiers.get(0);
-        int n = Math.max(1, Math.min(5, tiers.size()));
-        for (int i = 0; i < n; i++) meteorTiers.add(tiers.isEmpty() ? Tier.NONE : tiers.get(Math.min(i, tiers.size() - 1)));
+        meteorTiers.addAll(tiers.subList(0, Math.min(10, tiers.size())));
+        while (meteorTiers.size() < 3) meteorTiers.add(COMPANION); // a lone meteor looks empty
+        int n = meteorTiers.size();
         seed = state.round().roundId * 31L + 7;
         Random r = new Random(seed);
-        startX = new float[n];
-        startY = new float[n];
-        endX = new float[n];
+        angle = new float[n];
+        dist = new float[n];
+        swirl = new float[n];
+        // spread evenly around the screen, starting at a random angle, with a little jitter;
+        // the rarest meteor gets no special place so the colour stays the only hint
+        float base = r.nextFloat() * Mth.TWO_PI;
+        float dir = r.nextBoolean() ? 1 : -1;
         for (int i = 0; i < n; i++) {
-            // from the upper-right corner region, just inside the screen so the streak is visible from the start
-            startX[i] = 0.78F + r.nextFloat() * 0.2F;
-            startY[i] = 0.02F + r.nextFloat() * 0.12F;
-            endX[i] = 0.5F + (i == 0 ? 0 : (r.nextFloat() - 0.5F) * 0.12F);
+            angle[i] = base + i * Mth.TWO_PI / n + (r.nextFloat() - 0.5F) * 0.5F;
+            dist[i] = 0.82F + r.nextFloat() * 0.18F;   // just inside the screen edge, visible from the first frame
+            swirl[i] = dir * (0.95F + r.nextFloat() * 0.45F); // strong sideways bend → clear vortex
         }
+    }
+
+    /**
+     * Position of meteor {@code i} at progress {@code p} (0 = start, 1 = impact): a quadratic bezier from outside the
+     * screen to the impact point whose control point is the start rotated sideways, so every meteor curves in.
+     */
+    private float[] pathPoint(int i, float p, float cx, float cy) {
+        float half = (float) Math.hypot(width, height) / 2;
+        float sx = cx + Mth.cos(angle[i]) * dist[i] * half, sy = cy + Mth.sin(angle[i]) * dist[i] * half;
+        float ca = angle[i] + swirl[i];
+        float kx = cx + Mth.cos(ca) * dist[i] * half * 0.75F, ky = cy + Mth.sin(ca) * dist[i] * half * 0.75F;
+        float u = 1 - p;
+        return new float[]{u * u * sx + 2 * u * p * kx + p * p * cx, u * u * sy + 2 * u * p * ky + p * p * cy};
     }
 
     @Override
@@ -103,15 +127,13 @@ public class SummonScreen extends Screen {
         drawStars(g, t, fade);
 
         float cx = width / 2F, cy = height * 0.55F;
-        // meteors
+        // meteors: from all around the screen, curving in like a vortex, all hitting the centre at IMPACT
         for (int i = 0; i < meteorTiers.size(); i++) {
-            float start = FADE + i * 2;
-            float p = (t - start) / (FLY - i * 2);
+            float start = FADE + (i % 3);
+            float p = (t - start) / (IMPACT - start);
             if (p <= 0 || p >= 1) continue;
-            float e = 0.55F * p + 0.45F * p * p; // steady, slightly accelerating into the impact
-            float sx = startX[i] * width, sy = startY[i] * height, ex = endX[i] * width;
-            float x = sx + (ex - sx) * e, y = sy + (cy - sy) * e;
-            drawMeteor(g, x, y, ex - sx, cy - sy, meteorTiers.get(i), i == 0 ? 1.0F : 0.7F);
+            float e = 0.35F * p + 0.65F * p * p; // accelerating into the impact
+            drawMeteor(g, i, e, cx, cy);
         }
 
         // impact: expanding rings, rays and a flash in the best colour
@@ -150,23 +172,30 @@ public class SummonScreen extends Screen {
         }
     }
 
-    /** A bright head with a fading tail pointing back along (dx, dy). */
-    private void drawMeteor(GuiGraphics g, float x, float y, float dx, float dy, int tier, float size) {
-        int c = tier < 0 ? 0xB8B8C8 : Tier.color(tier);
-        float len = (float) Math.hypot(dx, dy);
-        float ux = dx / len, uy = dy / len;
-        int segments = 22;
+    /** Meteor {@code i} at path progress {@code e}: a bright head and a tail that follows the curve behind it. */
+    private void drawMeteor(GuiGraphics g, int i, float e, float cx, float cy) {
+        int tier = meteorTiers.get(i);
+        boolean companion = tier == COMPANION;
+        boolean lead = i == 0 && !companion;
+        float size = companion ? 0.5F : lead ? 1.0F : 0.75F;
+        int c = companion ? 0x8A8A9A : tier < 0 ? 0xB8B8C8 : Tier.color(tier);
+        int alpha = companion ? 150 : 230;
+        int segments = 26;
         for (int k = segments; k >= 0; k--) {
-            float back = k * 4.5F * size;
-            float px = x - ux * back, py = y - uy * back;
+            float pe = e - k * 0.012F;
+            if (pe <= 0) continue;
+            float[] p = pathPoint(i, pe, cx, cy);
             float f = 1 - k / (float) segments;
-            int a = (int) (f * f * 220);
+            int a = (int) (f * f * alpha);
             int s = Math.max(1, (int) ((1 + 5 * f) * size));
-            g.fill((int) px - s / 2, (int) py - s / 2, (int) px + (s + 1) / 2, (int) py + (s + 1) / 2, (a << 24) | c);
+            g.fill((int) p[0] - s / 2, (int) p[1] - s / 2, (int) p[0] + (s + 1) / 2, (int) p[1] + (s + 1) / 2, (a << 24) | c);
         }
-        int glow = (int) (8 * size);
-        g.fill((int) x - glow / 2, (int) y - glow / 2, (int) x + glow / 2, (int) y + glow / 2, 0x80000000 | c);
-        g.fill((int) x - 2, (int) y - 2, (int) x + 2, (int) y + 2, 0xFFFFFFFF);
+        float[] head = pathPoint(i, e, cx, cy);
+        int x = (int) head[0], y = (int) head[1];
+        int glow = (int) (9 * size);
+        g.fill(x - glow / 2, y - glow / 2, x + glow / 2, y + glow / 2, ((companion ? 0x50 : 0x80) << 24) | c);
+        int core = companion ? 1 : 2;
+        g.fill(x - core, y - core, x + core, y + core, companion ? 0xC0FFFFFF : 0xFFFFFFFF);
     }
 
     private void drawRays(GuiGraphics g, float cx, float cy, float it, int c, float strength) {
