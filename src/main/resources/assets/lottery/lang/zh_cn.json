@@ -124,6 +124,7 @@
   "gui.lottery.case.hint": "点「开启」开始转动",
   "gui.lottery.case.empty": "谢谢",
   "gui.lottery.cards.title": "%s · %s 连抽",
+  "gui.lottery.cards.title_single": "%s · 单抽",
   "gui.lottery.cards.flip_all": "全部翻开",
   "gui.lottery.cards.hint": "点击卡牌翻开",
   "gui.lottery.cards.empty": "谢谢参与",

@@ -210,7 +210,8 @@ public class CardScreen extends PlayScreen {
 
     @Override
     protected void renderContent(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
-        titleBar(g, Component.translatable("gui.lottery.cards.title", round.typeName, count));
+        titleBar(g, count == 1 ? Component.translatable("gui.lottery.cards.title_single", round.typeName)
+                : Component.translatable("gui.lottery.cards.title", round.typeName, count));
 
         float now = ticks + partialTick;
         int hovered = dealing() ? -1 : cardAt(mouseX, mouseY);

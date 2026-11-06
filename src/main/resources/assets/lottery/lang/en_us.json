@@ -119,6 +119,7 @@
   "gui.lottery.case.hint": "Press Open to spin",
   "gui.lottery.case.empty": "None",
   "gui.lottery.cards.title": "%s · %s-pull",
+  "gui.lottery.cards.title_single": "%s · single pull",
   "gui.lottery.cards.flip_all": "Flip all",
   "gui.lottery.cards.hint": "Click a card to flip it",
   "gui.lottery.cards.empty": "Nothing",

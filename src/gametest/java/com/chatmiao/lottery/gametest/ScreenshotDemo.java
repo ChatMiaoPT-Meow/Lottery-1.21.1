@@ -61,23 +61,28 @@ public final class ScreenshotDemo {
         }
         if (ticks == 110) pressLabel(mc, Component.translatable("gui.lottery.hub.pull_multi", 10, 9).getString());
         if (ticks == 118) mc.setScreen(new com.chatmiao.lottery.client.SummonScreen(new Payloads.HubState(cardRound(), true, 1, 9, true, NEW_MASK)));
-        if (ticks == 200) press(mc, "gui.lottery.cards.flip_all");
-        frame(mc, "g", 104, 345);
+        if (ticks == 252) press(mc, "gui.lottery.cards.flip_all");
+        frame(mc, "g", 104, 400);
         // --- case opening
-        if (ticks == 350) {
+        if (ticks == 410) {
             open(mc, caseRound(), 2);
             parkMouse(mc);
         }
-        if (ticks == 360) press(mc, "gui.lottery.case.open");
-        frame(mc, "c", 352, 500);
+        if (ticks == 420) press(mc, "gui.lottery.case.open");
+        frame(mc, "c", 412, 560);
         // --- scratch: reveal all → stamp → summary
-        if (ticks == 510) {
+        if (ticks == 570) {
             open(mc, sampleRound(0b000_000_101_011), 23);
             parkMouse(mc);
         }
-        if (ticks == 522) press(mc, "gui.lottery.scratch.reveal_all");
-        frame(mc, "s", 512, 585);
-        if (ticks == 600) mc.stop();
+        if (ticks == 582) press(mc, "gui.lottery.scratch.reveal_all");
+        frame(mc, "s", 572, 645);
+        // --- single pull: silver lead-in beats → pause → the gold one → its card
+        if (ticks == 660) mc.setScreen(new com.chatmiao.lottery.client.SummonScreen(
+                new Payloads.HubState(singleRound(), true, 1, 1, true, 1L)));
+        if (ticks == 775) press(mc, "gui.lottery.cards.flip_all");
+        frame(mc, "u", 660, 850);
+        if (ticks == 865) mc.stop();
     }
 
     private static void frame(Minecraft mc, String seq, int from, int to) {
@@ -529,6 +534,19 @@ public final class ScreenshotDemo {
         r.paletteTier = reels.paletteTier();
         r.reels = reels.reels();
         r.winId = "W5-ABCDEFGH";
+        return r;
+    }
+
+    /** A single gacha pull (one card) that lands a legendary prize. */
+    private static ScratchRound singleRound() {
+        ScratchRound r = new ScratchRound();
+        r.roundId = 5;
+        r.typeId = 6;
+        r.typeName = "星辉十连";
+        r.style = PlayStyle.CARDS.id;
+        r.cardCols = 5;
+        r.draws = List.of(prize(Items.NETHERITE_INGOT, 1, 4));
+        r.winId = "";
         return r;
     }
 
