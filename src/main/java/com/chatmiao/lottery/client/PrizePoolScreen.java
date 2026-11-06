@@ -1,7 +1,6 @@
 package com.chatmiao.lottery.client;
 
 import com.chatmiao.lottery.data.PrizePool;
-import com.chatmiao.lottery.data.Tier;
 import com.chatmiao.lottery.data.TicketType;
 import com.chatmiao.lottery.network.Payloads;
 import net.minecraft.client.gui.GuiGraphics;
@@ -37,7 +36,7 @@ import java.util.function.IntConsumer;
  * </pre>
  */
 public class PrizePoolScreen extends Screen {
-    private static final int LIST_W = 112, ROW_H = 12, ITEM_ROW_H = 18, CELL = 18;
+    private static final int LIST_W = 112, ROW_H = 18, ITEM_ROW_H = 18, CELL = 18;
     private static final int S_LIST = 0, S_ITEMS = 1, S_RESULTS = 2;
     private static final int C_PANEL = 0xF0202329, C_COL = 0xFF2B2F36, C_BORDER = 0xFF4A505C, C_INSET = 0xFF1A1D22,
             C_TEXT = 0xFFE8E8E8, C_DIM = 0xFF9AA0AA, C_ACCENT = 0xFFFFC94A, C_SEL = 0xFF3D5A80, C_BAD = 0xFFE06060,
@@ -60,7 +59,7 @@ public class PrizePoolScreen extends Screen {
     private int colAX, colAW, colBX, colBW, y0, itemY, itemRows, editY, resultY, resultCols, resultRows;
 
     private EditBox nameBox, weightBox, minBox, maxBox, searchBox;
-    private Stepper tierStep;
+
     private Button delItemBtn, offhandBtn, deleteBtn;
 
     public PrizePoolScreen(Payloads.OpenPrizePools data) {
@@ -151,10 +150,7 @@ public class PrizePoolScreen extends Screen {
         resultCols = Math.max(4, (colBW - 6) / CELL);
         resultRows = Math.max(1, (cb - 20 - resultY) / CELL);
 
-        nameBox = textBox(cx + 30, top + 24, Math.min(140, cw / 2 - 40), TicketType.MAX_NAME, s -> { edit.name = s; touch(); });
-        int tierW = 96;
-        tierStep = new Stepper(this::addRenderableWidget, cx + cw - 4 - tierW, top + 24, tierW, 14,
-                d -> { edit.tier = Stepper.wrap(edit.tier, d, Tier.COUNT); touch(); }, this::refresh);
+        nameBox = textBox(cx + 30, top + 24, Math.min(200, cw - 40), TicketType.MAX_NAME, s -> { edit.name = s; touch(); });
 
         weightBox = numBox(colAX + 30, editY, 44, v -> { if (item() != null) { item().weight = v; touch(); } });
         minBox = numBox(colAX + 30, editY + 17, 36, v -> { if (item() != null) { item().min = v; touch(); } });
@@ -208,7 +204,7 @@ public class PrizePoolScreen extends Screen {
         if (nameBox == null) return;
         loading = true;
         nameBox.setValue(edit.name);
-        tierStep.setMessage(Tier.name(edit.tier));
+
         TicketType.PoolItem it = item();
         weightBox.visible = minBox.visible = maxBox.visible = delItemBtn.visible = it != null;
         if (it != null) {
@@ -465,10 +461,10 @@ public class PrizePoolScreen extends Screen {
             int y = lr[1] + r * ROW_H;
             if (p.id == edit.id) g.fill(left + 4, y, left + 4 + LIST_W, y + ROW_H, C_SEL);
             else if (inside(new int[]{left + 4, y, LIST_W, ROW_H}, mouseX, mouseY)) g.fill(left + 4, y, left + 4 + LIST_W, y + ROW_H, C_HOVER);
-            g.fill(left + 6, y + 2, left + 9, y + 10, 0xFF000000 | Tier.color(p.tier));
+            g.renderItem(p.items.isEmpty() ? new ItemStack(Items.BARRIER) : p.items.get(0).item, left + 5, y + 1);
             String n = String.valueOf(p.items.size());
-            g.drawString(font, font.plainSubstrByWidth(p.name, LIST_W - 22 - font.width(n)), left + 12, y + 2, C_TEXT, false);
-            g.drawString(font, n, left + LIST_W - 6 - font.width(n), y + 2, p.items.isEmpty() ? C_BAD : C_DIM, false);
+            g.drawString(font, font.plainSubstrByWidth(p.name, LIST_W - 32 - font.width(n)), left + 23, y + 5, C_TEXT, false);
+            g.drawString(font, n, left + LIST_W - 6 - font.width(n), y + 5, p.items.isEmpty() ? C_BAD : C_DIM, false);
         }
         if (pools.isEmpty()) g.drawString(font, Component.translatable("gui.lottery.pools.none"), left + 6, top + 22, C_DIM, false);
         drawScrollbar(g, S_LIST);
@@ -479,8 +475,6 @@ public class PrizePoolScreen extends Screen {
         g.drawString(font, font.plainSubstrByWidth(header.getString(), cw - 16), cx + 4, top + 9, C_ACCENT, false);
         if (dirty) g.drawString(font, "*", cx + cw - 8, top + 9, C_BAD, false);
         g.drawString(font, Component.translatable("gui.lottery.terminal.name"), cx + 4, top + 27, C_TEXT, false);
-        Component tl = Component.translatable("gui.lottery.terminal.tier");
-        g.drawString(font, tl, cx + cw - 4 - 96 - 4 - font.width(tl), top + 27, C_TEXT, false);
 
         List<String> users = users();
         Component use = edit.id <= 0 ? Component.translatable("gui.lottery.pools.unsaved_hint")

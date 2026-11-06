@@ -6,8 +6,8 @@ import net.minecraft.network.chat.Component;
 public enum PlayStyle {
     /** 对号刮奖: winning numbers + a cols×rows grid of my numbers under a scratch coating. */
     MATCH(0, 10),
-    /** 开箱转盘: one horizontal reel per draw that spins and stops on the prize. */
-    CASE(1, 5),
+    /** 开箱转盘: one vertical reel per draw (side by side) that spins and stops on the prize. */
+    CASE(1, 10),
     /** 卡牌抽卡: one face-down card per draw (e.g. a ten-pull). */
     CARDS(2, 10);
 

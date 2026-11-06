@@ -52,7 +52,7 @@ public final class TicketType {
     public int spinSeconds = 5;
     /** CARDS: cards per row. */
     public int cardCols = 5;
-    /** CARDS: rare cards (tier >= 3) glow before flipping and flip with a special animation. */
+    /** CARDS / CASE: rare prizes (tier >= 3) get their own build-up and reveal effects. */
     public boolean rareEffect = true;
 
     // ---- pity
@@ -116,7 +116,7 @@ public final class TicketType {
 
     /**
      * One prize pool used by this type: a reference to a shared {@link PrizePool} ({@link #poolId}) plus this type's
-     * weight for it. {@link #name}/{@link #tier}/{@link #items} are a snapshot of the referenced pool, refreshed by
+     * weight and rarity ({@link #tier}) for it. {@link #name}/{@link #items} are a snapshot of the referenced pool, refreshed by
      * {@link LotteryData} whenever pools change (and sent to the terminal for previews). A slot with poolId 0 carries
      * its own items (saves from before shared pools, tests); the server turns those into shared pools on save/load.
      */
@@ -132,11 +132,9 @@ public final class TicketType {
             items.clear();
             if (src == null) {
                 name = "?";
-                tier = 0;
                 return;
             }
             name = src.name;
-            tier = src.tier;
             for (PoolItem it : src.items) items.add(it.copy());
         }
 
@@ -387,12 +385,12 @@ public final class TicketType {
         for (Pool p : pools) {
             CompoundTag pt = new CompoundTag();
             pt.putInt("weight", p.weight);
+            pt.putInt("tier", p.tier);
             if (p.poolId > 0) {
                 pt.putInt("pool", p.poolId);
             } else {
                 // a self-contained slot (not yet turned into a shared pool) keeps its contents
                 pt.putString("name", p.name);
-                pt.putInt("tier", p.tier);
                 pt.put("items", saveItems(p.items, provider));
             }
             poolList.add(pt);
@@ -431,7 +429,8 @@ public final class TicketType {
             p.poolId = pt.getInt("pool"); // 0 in saves from before shared pools: contents are inline
             p.name = pt.getString("name");
             p.weight = pt.getInt("weight");
-            p.tier = pt.getInt("tier"); // missing in old saves -> 0 (普通)
+            // missing in pre-tier saves -> 0 (普通); missing on a pool reference (0.4.0-beta.1/2) -> -1, filled in from the pool
+            p.tier = pt.contains("tier") ? pt.getInt("tier") : p.poolId > 0 ? -1 : 0;
             loadItems(pt.getList("items", Tag.TAG_COMPOUND), provider, p.items);
             t.pools.add(p);
         }

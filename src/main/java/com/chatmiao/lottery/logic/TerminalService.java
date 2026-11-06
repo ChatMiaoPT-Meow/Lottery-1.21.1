@@ -59,7 +59,7 @@ public final class TerminalService {
             return;
         }
         LotteryLog.log(player.server, "CONFIG", LotteryLog.who(player) + (created ? " created" : " updated") + " prize pool #"
-                + stored.id + " " + stored.name + " tier=" + stored.tier + " items=" + stored.items.size()
+                + stored.id + " " + stored.name + " items=" + stored.items.size()
                 + " usedBy=" + data.usersOf(stored.id).size());
         player.displayClientMessage(Component.translatable("message.lottery.pool.saved", stored.id, stored.name)
                 .withStyle(ChatFormatting.GREEN), true);

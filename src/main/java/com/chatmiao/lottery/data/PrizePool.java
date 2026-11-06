@@ -9,15 +9,16 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * A reusable prize pool (奖池): a rarity and a weighted item list. Configured once in the terminal's
- * "奖池设置" page and referenced by any number of ticket types / gacha pools, each with its own weight.
+ * A reusable prize pool (奖池): just a weighted item list. Configured once in the terminal's "奖池设置" page and
+ * referenced by any number of ticket types / gacha pools; each of them gives it its own weight and rarity.
  */
 public final class PrizePool {
     public static final int MAX_POOLS = 256;
 
     public int id;
     public String name = "";
-    public int tier;
+    /** Rarity stored by 0.4.0-beta.1/2, when pools still had one; only used to migrate those saves (-1 = none). */
+    public transient int legacyTier = -1;
     public final List<TicketType.PoolItem> items = new ArrayList<>();
 
     public long totalItemWeight() {
@@ -30,7 +31,7 @@ public final class PrizePool {
         PrizePool p = new PrizePool();
         p.id = id;
         p.name = name;
-        p.tier = tier;
+        p.legacyTier = legacyTier;
         for (TicketType.PoolItem it : items) p.items.add(it.copy());
         return p;
     }
@@ -39,7 +40,6 @@ public final class PrizePool {
         name = name == null ? "" : name.strip();
         if (name.length() > TicketType.MAX_NAME) name = name.substring(0, TicketType.MAX_NAME);
         if (name.isEmpty()) name = "奖池";
-        tier = Tier.clamp(tier);
         items.removeIf(it -> it.item == null || it.item.isEmpty());
         while (items.size() > TicketType.MAX_ITEMS) items.remove(items.size() - 1);
         for (TicketType.PoolItem it : items) it.sanitize();
@@ -48,7 +48,6 @@ public final class PrizePool {
     public void write(RegistryFriendlyByteBuf buf) {
         buf.writeVarInt(id);
         buf.writeUtf(name, 256);
-        buf.writeVarInt(tier);
         TicketType.writeItems(buf, items);
     }
 
@@ -56,7 +55,6 @@ public final class PrizePool {
         PrizePool p = new PrizePool();
         p.id = buf.readVarInt();
         p.name = buf.readUtf(256);
-        p.tier = buf.readVarInt();
         TicketType.readItems(buf, p.items);
         return p;
     }
@@ -65,7 +63,6 @@ public final class PrizePool {
         CompoundTag tag = new CompoundTag();
         tag.putInt("id", id);
         tag.putString("name", name);
-        tag.putInt("tier", tier);
         tag.put("items", TicketType.saveItems(items, provider));
         return tag;
     }
@@ -74,7 +71,7 @@ public final class PrizePool {
         PrizePool p = new PrizePool();
         p.id = tag.getInt("id");
         p.name = tag.getString("name");
-        p.tier = Tier.clamp(tag.getInt("tier"));
+        p.legacyTier = tag.contains("tier") ? Tier.clamp(tag.getInt("tier")) : -1;
         TicketType.loadItems(tag.getList("items", Tag.TAG_COMPOUND), provider, p.items);
         return p;
     }

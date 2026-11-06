@@ -72,7 +72,7 @@ public class TerminalScreen extends Screen {
     private EditBox drawsBox, winCountBox, colsBox, rowsBox, rangeBox, spinBox, cardColsBox, pityCountBox;
     private Button enableBtn, delPoolBtn, upPoolBtn, downPoolBtn, generateBtn, saveBtn;
     private Button rareBtn;
-    private Stepper styleStep, pityTierStep, guarTierStep, voucherStep;
+    private Stepper styleStep, pityTierStep, guarTierStep, voucherStep, slotTierStep;
     private final List<TabButton> tabs = new ArrayList<>();
     /** Shared prize pools (奖池设置) that slots can reference. */
     private List<PrizePool> prizePools = new ArrayList<>();
@@ -175,7 +175,7 @@ public class TerminalScreen extends Screen {
         colBX = colAX + colAW + 8;
         colBW = cx + cw - 4 - colBX;
         poolY = ct + 18;
-        poolRows = Math.max(3, (cb - 40 - poolY) / POOL_ROW_H);
+        poolRows = Math.max(3, (cb - 58 - poolY) / POOL_ROW_H);
         availY = ct + 18;
         availRows = Math.max(3, ((cb - ct) * 45 / 100) / POOL_ROW_H);
         contentY = availY + availRows * POOL_ROW_H + 18;
@@ -221,6 +221,8 @@ public class TerminalScreen extends Screen {
         slotWeightBox = numBox(colAX + 30, cb - 34, 44, v -> {
             if (pool() != null) { pool().weight = v; touch(); }
         });
+        slotTierStep = new Stepper(this::addRenderableWidget, colAX + 30, cb - 52, Math.min(110, colAW - 30), 14,
+                d -> { if (pool() != null) { pool().tier = Stepper.wrap(pool().tier, d, Tier.COUNT); touch(); } }, this::refreshWidgets);
 
         // ---- style tab (settings on the left, preview on the right)
         int sx = colAX;
@@ -373,7 +375,11 @@ public class TerminalScreen extends Screen {
         upPoolBtn.active = p != null && selPool > 0;
         downPoolBtn.active = p != null && selPool < edit.pools.size() - 1;
         slotWeightBox.visible = pools && p != null;
-        if (p != null) slotWeightBox.setValue(String.valueOf(p.weight));
+        slotTierStep.setVisible(pools && p != null);
+        if (p != null) {
+            slotWeightBox.setValue(String.valueOf(p.weight));
+            slotTierStep.setMessage(Tier.name(p.tier));
+        }
 
         // ---- style
         PlayStyle s = edit.playStyle();
@@ -383,7 +389,8 @@ public class TerminalScreen extends Screen {
         drawsBox.visible = pityCountBox.visible = style;
         winCountBox.visible = colsBox.visible = rowsBox.visible = rangeBox.visible = style && s == PlayStyle.MATCH;
         spinBox.visible = style && s == PlayStyle.CASE;
-        cardColsBox.visible = rareBtn.visible = style && s == PlayStyle.CARDS;
+        cardColsBox.visible = style && s == PlayStyle.CARDS;
+        rareBtn.visible = style && (s == PlayStyle.CARDS || s == PlayStyle.CASE);
         styleStep.setMessage(s.label());
         drawsBox.setValue(String.valueOf(edit.draws));
         winCountBox.setValue(String.valueOf(edit.winCount));
@@ -802,6 +809,7 @@ public class TerminalScreen extends Screen {
         drawScrollbar(g, S_POOLS);
         TicketType.Pool sel = pool();
         if (sel != null) {
+            label(g, "gui.lottery.terminal.tier_short", colAX, cb - 52);
             label(g, "gui.lottery.terminal.weight", colAX, cb - 34);
             g.drawString(font, Component.translatable("gui.lottery.terminal.share",
                     sel.usable() ? pct(total > 0 ? (double) sel.weight / total : 0) : "0%"), colAX + 80, cb - 31, C_DIM, false);
@@ -821,7 +829,6 @@ public class TerminalScreen extends Screen {
             boolean hover = inside(new int[]{colBX, y, colBW, POOL_ROW_H}, mouseX, mouseY);
             if (sel != null && sel.poolId == p.id) g.fill(colBX, y, colBX + colBW, y + POOL_ROW_H, C_SEL);
             else if (hover) g.fill(colBX, y, colBX + colBW, y + POOL_ROW_H, C_TAB_HOVER);
-            g.fill(colBX + 2, y + 2, colBX + 5, y + 10, 0xFF000000 | Tier.color(p.tier));
             String right = added ? Component.translatable("gui.lottery.terminal.pool_in").getString()
                     : hover ? "+" : Component.translatable("gui.lottery.terminal.pool_count", p.items.size()).getString();
             int rw = font.width(right);
@@ -982,18 +989,21 @@ public class TerminalScreen extends Screen {
                 }
             }
             case CASE -> {
-                int rh = Math.min(16, (ph - 10 - (draws - 1) * 4) / draws);
-                int tiles = (pw - 12) / 17;
+                // one vertical reel per draw, side by side, with the pointer across the middle
+                int colW = Math.min(18, (pw - 10 - (draws - 1) * 3) / draws);
+                int tile = Math.max(4, colW - 4), rowsShown = Math.max(1, (ph - 10) / (tile + 3));
+                int gw = draws * (colW + 3) - 3, gx = x0 + (pw - gw) / 2;
+                int mid = y0 + 5 + (rowsShown / 2) * (tile + 3);
                 for (int i = 0; i < draws; i++) {
-                    int y = y0 + 5 + i * (rh + 4);
-                    g.fill(x0 + 4, y, x0 + pw - 4, y + rh, 0xFF2C3038);
-                    for (int k = 0; k < tiles; k++) {
-                        int tx = x0 + 7 + k * 17;
+                    int x = gx + i * (colW + 3);
+                    g.fill(x, y0 + 4, x + colW, y0 + ph - 4, 0xFF2C3038);
+                    for (int k = 0; k < rowsShown; k++) {
+                        int ty = y0 + 5 + k * (tile + 3);
                         int tier = (k * 7 + i * 3) % Tier.COUNT;
-                        g.fill(tx, y + 2, tx + 14, y + rh - 2, 0xFF000000 | Tier.color(Math.min(tier, 2)));
+                        g.fill(x + 2, ty, x + colW - 2, ty + tile, 0xFF000000 | Tier.color(Math.min(tier, 2)));
                     }
-                    g.fill(x0 + pw / 2 - 1, y - 2, x0 + pw / 2 + 1, y + rh + 2, C_ACCENT);
                 }
+                g.fill(gx - 3, mid + tile / 2, gx + gw + 3, mid + tile / 2 + 1, C_ACCENT);
             }
             case CARDS -> {
                 int per = Math.min(clamp(edit.cardCols, 1, TicketType.MAX_COLS), draws);

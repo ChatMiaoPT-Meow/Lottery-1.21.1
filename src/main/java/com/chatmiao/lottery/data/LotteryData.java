@@ -233,7 +233,6 @@ public final class LotteryData extends SavedData {
             pool.id = nextPoolId++;
             String base = slot.name == null || slot.name.isBlank() ? "奖池" : slot.name.strip();
             pool.name = t.name == null || t.name.isBlank() ? base : t.name.strip() + "·" + base;
-            pool.tier = slot.tier;
             for (TicketType.PoolItem item : slot.items) pool.items.add(item.copy());
             pool.sanitize();
             prizePools.put(pool.id, pool);
@@ -315,6 +314,15 @@ public final class LotteryData extends SavedData {
         }
         boolean migrated = false;
         for (TicketType type : data.types.values()) migrated |= data.adoptInline(type);
+        for (TicketType type : data.types.values()) {
+            for (TicketType.Pool slot : type.pools) {
+                if (slot.tier >= 0) continue;
+                // 0.4.0-beta.1/2 kept the rarity on the shared pool; it now belongs to each type's reference
+                PrizePool src = data.prizePools.get(slot.poolId);
+                slot.tier = src != null && src.legacyTier >= 0 ? src.legacyTier : 0;
+                migrated = true;
+            }
+        }
         data.relinkAll();
         if (migrated) {
             com.chatmiao.lottery.LotteryMod.LOGGER.info("Moved per-type prize pools into shared pools ({} pools)", data.prizePools.size());

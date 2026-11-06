@@ -555,7 +555,6 @@ public class LotteryGameTests {
         LotteryData data = LotteryData.get(h.getLevel().getServer());
         com.chatmiao.lottery.data.PrizePool gold = new com.chatmiao.lottery.data.PrizePool();
         gold.name = "共享金池";
-        gold.tier = 4;
         TicketType.PoolItem diamond = new TicketType.PoolItem();
         diamond.item = new ItemStack(Items.DIAMOND);
         diamond.weight = 1;
@@ -569,6 +568,7 @@ public class LotteryGameTests {
         TicketType.Pool slotA = new TicketType.Pool();
         slotA.poolId = gold.id;
         slotA.weight = 5;
+        slotA.tier = 4;
         a.pools.add(slotA);
         a = data.saveType(a);
         TicketType b = new TicketType();
@@ -577,11 +577,13 @@ public class LotteryGameTests {
         TicketType.Pool slotB = new TicketType.Pool();
         slotB.poolId = gold.id;
         slotB.weight = 1;
+        slotB.tier = 1;
         b.pools.add(slotB);
         b = data.saveType(b);
 
         TicketType storedA = data.type(a.id), storedB = data.type(b.id);
-        h.assertTrue(storedA.pools.get(0).tier == 4 && storedA.pools.get(0).items.size() == 1, "slot sees the pool's tier and items");
+        h.assertTrue(storedA.pools.get(0).items.size() == 1 && storedA.pools.get(0).tier == 4 && storedB.pools.get(0).tier == 1,
+                "slot sees the pool's items; each type gives the same pool its own rarity");
         h.assertTrue(storedA.pools.get(0).weight == 5 && storedB.pools.get(0).weight == 1, "each type keeps its own weight");
         h.assertTrue(Math.abs(storedB.winChance() - 0.5) < 1e-9, "B: 1 empty vs 1 pool = 50%");
         Prize p = Roller.roll(storedA, RandomSource.create(1));
@@ -589,10 +591,10 @@ public class LotteryGameTests {
 
         // edit the pool once: both types follow
         gold.items.get(0).item = new ItemStack(Items.EMERALD);
-        gold.tier = 5;
         data.savePrizePool(gold);
         h.assertTrue(data.type(a.id).pools.get(0).items.get(0).item.is(Items.EMERALD)
-                && data.type(b.id).pools.get(0).tier == 5, "pool edits reach every type using it");
+                && data.type(b.id).pools.get(0).items.get(0).item.is(Items.EMERALD)
+                && data.type(a.id).pools.get(0).tier == 4, "pool edits reach every type using it; rarity stays per type");
 
         h.assertTrue(!data.deletePrizePool(gold.id), "a pool in use can't be deleted");
         h.assertTrue(data.usersOf(gold.id).size() == 2, "both types listed as users");

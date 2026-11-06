@@ -69,20 +69,20 @@ public final class ScreenshotDemo {
             parkMouse(mc);
         }
         if (ticks == 500) press(mc, "gui.lottery.case.open");
-        frame(mc, "c", 492, 640);
+        frame(mc, "c", 492, 700);
         // --- scratch: reveal all → stamp → summary
-        if (ticks == 650) {
+        if (ticks == 720) {
             open(mc, sampleRound(0b000_000_101_011), 23);
             parkMouse(mc);
         }
-        if (ticks == 662) press(mc, "gui.lottery.scratch.reveal_all");
-        frame(mc, "s", 652, 725);
+        if (ticks == 732) press(mc, "gui.lottery.scratch.reveal_all");
+        frame(mc, "s", 722, 795);
         // --- single pull: silver lead-in beats → pause → the gold one → its card
-        if (ticks == 740) mc.setScreen(new com.chatmiao.lottery.client.SummonScreen(
+        if (ticks == 810) mc.setScreen(new com.chatmiao.lottery.client.SummonScreen(
                 new Payloads.HubState(singleRound(), true, 1, 1, true, 1L)));
-        if (ticks == 855) press(mc, "gui.lottery.cards.flip_all");
-        frame(mc, "u", 740, 930);
-        if (ticks == 945) mc.stop();
+        if (ticks == 925) press(mc, "gui.lottery.cards.flip_all");
+        frame(mc, "u", 810, 1000);
+        if (ticks == 1015) mc.stop();
     }
 
     private static void frame(Minecraft mc, String seq, int from, int to) {
@@ -528,8 +528,9 @@ public final class ScreenshotDemo {
         r.typeName = "龙之宝箱";
         r.style = PlayStyle.CASE.id;
         r.spinSeconds = 3;
-        r.draws = List.of(prize(Items.GOLD_INGOT, 6, 1), prize(Items.NETHERITE_INGOT, 1, 4), Draw.EMPTY);
-        Roller.Reels reels = Roller.buildReels(type(5), RandomSource.create(9), 3);
+        r.draws = List.of(prize(Items.GOLD_INGOT, 6, 1), prize(Items.IRON_INGOT, 12, 0), Draw.EMPTY, prize(Items.DIAMOND, 2, 3),
+                prize(Items.BREAD, 24, 0), prize(Items.NETHERITE_INGOT, 1, 4), prize(Items.EMERALD, 5, 2), Draw.EMPTY);
+        Roller.Reels reels = Roller.buildReels(type(5), RandomSource.create(9), 8);
         r.palette = reels.palette();
         r.paletteTier = reels.paletteTier();
         r.reels = reels.reels();

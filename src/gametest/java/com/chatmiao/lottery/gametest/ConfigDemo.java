@@ -370,21 +370,17 @@ public final class ConfigDemo {
         clickOn(button("gui.lottery.terminal.save"));
         wait(12);
 
-        say("⑥ 奖池「史诗」：钻石。稀有度点过头了？点 ◀ 退回一格");
+        say("⑥ 奖池「钻石池」：钻石");
         clickOn(button("gui.lottery.pools.new"));
-        type("nameBox", "史诗");
-        clicks(stepper("tierStep", "next"), 4);
-        wait(6);
-        clickOn(stepper("tierStep", "prev"));
+        type("nameBox", "钻石池");
         type("searchBox", "钻石");
         clickOn(result(Items.DIAMOND));
         clickOn(button("gui.lottery.terminal.save"));
         wait(12);
 
-        say("⑦ 奖池「神话」：下界之星。从「普通」点 ◀ 直接到「神话」");
+        say("⑦ 奖池「星辰池」：下界之星（奖池只管奖品，稀有度在卡池里设）");
         clickOn(button("gui.lottery.pools.new"));
-        type("nameBox", "神话");
-        clickOn(stepper("tierStep", "prev"));
+        type("nameBox", "星辰池");
         type("searchBox", "下界之星");
         clickOn(result(Items.NETHER_STAR));
         clickOn(button("gui.lottery.terminal.save"));
@@ -401,17 +397,24 @@ public final class ConfigDemo {
         type("nameBox", "星辉十连");
         type("emptyBox", "40");
 
-        say("⑨ 奖池页签：点击加入三个奖池，分别设权重 60 / 8 / 2");
+        say("⑨ 奖池页签：点击加入三个奖池，设权重 60 / 8 / 2");
         clickOn(button("gui.lottery.terminal.tab_pools"));
         clickOn(availRow("普通"));
         type("slotWeightBox", "60");
-        clickOn(availRow("史诗"));
+        clickOn(availRow("钻石池"));
         type("slotWeightBox", "8");
-        clickOn(availRow("神话"));
+        say("⑩ 给钻石池设稀有度「史诗」。点过头了？点 ◀ 退回一格");
+        clicks(stepper("slotTierStep", "next"), 4);
+        wait(8);
+        clickOn(stepper("slotTierStep", "prev"));
+        wait(6);
+        clickOn(availRow("星辰池"));
         type("slotWeightBox", "2");
-        wait(10);
+        say("⑪ 星辰池从「普通」点一下 ◀ 直接到「神话」");
+        clickOn(stepper("slotTierStep", "prev"));
+        wait(14);
 
-        say("⑩ 玩法：卡牌抽卡，保底 50 抽必出神话，十连至少一个史诗");
+        say("⑫ 玩法：卡牌抽卡，保底 50 抽必出神话，十连至少一个史诗");
         clickOn(button("gui.lottery.terminal.tab_style"));
         clicks(stepper("styleStep", "next"), 2);
         type("drawsBox", "10");
@@ -420,7 +423,7 @@ public final class ConfigDemo {
         clicks(stepper("guarTierStep", "next"), 4);
         wait(8);
 
-        say("⑪ 上架：用星辉券，单抽 1 张、10 连 9 张");
+        say("⑬ 上架：用星辉券，单抽 1 张、10 连 9 张");
         clickOn(button("gui.lottery.terminal.tab_hub"));
         clickOn(widgetAt("hubBtn"));
         clickOn(stepper("voucherStep", "next"));
@@ -429,11 +432,11 @@ public final class ConfigDemo {
         type("costMultiBox", "9");
         wait(10);
 
-        say("⑫ 保存：卡池马上开放，不需要生成彩票");
+        say("⑭ 保存：卡池马上开放，不需要生成彩票");
         clickOn(button("gui.lottery.terminal.save"));
         wait(24);
 
-        say("⑬ 玩家按 K 打开卡池，点「10 连」");
+        say("⑮ 玩家按 K 打开卡池，点「10 连」");
         add(m -> {
             m.setScreen(null);
             return 6;
