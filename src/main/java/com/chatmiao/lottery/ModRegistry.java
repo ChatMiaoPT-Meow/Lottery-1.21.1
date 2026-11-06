@@ -84,17 +84,17 @@ public final class ModRegistry {
     public static final DeferredItem<OpBlockItem> REDEEM_STATION_ITEM = ITEMS.register("redeem_station",
             () -> new OpBlockItem(REDEEM_STATION.get(), new Item.Properties().stacksTo(16)));
 
-    // ---- creative tab (only shows items to operators with "operator items" enabled) ----
+    // ---- creative tab ----
+    // Always listed (no "operator items" option needed): the items guard themselves on the server — the terminal
+    // refuses non-operators and the station blocks can only be placed by operators.
     public static final DeferredHolder<CreativeModeTab, CreativeModeTab> TAB = TABS.register("main", () ->
             CreativeModeTab.builder()
                     .title(Component.translatable("itemGroup.lottery"))
                     .icon(() -> new ItemStack(SCRATCH_TICKET.get()))
                     .displayItems((params, out) -> {
-                        if (params.hasPermissions()) {
-                            out.accept(LOTTERY_TERMINAL.get());
-                            out.accept(SCRATCH_TABLE_ITEM.get());
-                            out.accept(REDEEM_STATION_ITEM.get());
-                        }
+                        out.accept(LOTTERY_TERMINAL.get());
+                        out.accept(SCRATCH_TABLE_ITEM.get());
+                        out.accept(REDEEM_STATION_ITEM.get());
                     })
                     .build());
 
