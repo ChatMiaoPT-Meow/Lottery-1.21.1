@@ -76,8 +76,12 @@ public abstract class PlayScreen extends Screen {
     private boolean summaryHidden;
     private boolean builtWithSummary;
     private int summaryTilesSounded;
-    /** The full-screen mythic showcase already ran for this ticket. */
+    /** The end-of-ticket mythic check already ran for this ticket. */
     private boolean mythicPlayed;
+    /** Draw-index bits whose mythic showcase already played (e.g. a card shown as it was flipped). */
+    protected long showcased;
+    /** The showcase that is playing was started at the end of the ticket (summary follows right after). */
+    private boolean mythicAtEnd;
     private int sx, sy, sw, sh, sCols;
     private final List<Button> overlayButtons = new ArrayList<>();
 
@@ -144,6 +148,7 @@ public abstract class PlayScreen extends Screen {
         summaryHidden = false;
         summaryTilesSounded = 0;
         mythicPlayed = false;
+        showcased = 0;
         onNewRound();
         finished = allRevealed();
         finishedAt = -10_000;
@@ -172,20 +177,45 @@ public abstract class PlayScreen extends Screen {
         return 14;
     }
 
-    private List<Draw> mythics() {
-        List<Draw> out = new ArrayList<>();
-        for (Draw d : round.draws) if (d.won() && d.tier() >= MythicScreen.MYTHIC) out.add(d);
+    protected boolean isMythic(int drawIndex) {
+        Draw d = drawIndex < round.draws.size() ? round.draws.get(drawIndex) : Draw.EMPTY;
+        return d.won() && d.tier() >= MythicScreen.MYTHIC;
+    }
+
+    /** Mythic draws that haven't had their showcase yet. */
+    private List<Integer> pendingMythics() {
+        List<Integer> out = new ArrayList<>();
+        for (int i = 0; i < round.draws.size() && i < 64; i++) {
+            if (isMythic(i) && (showcased & (1L << i)) == 0) out.add(i);
+        }
         return out;
     }
 
-    /** Back from the mythic showcase: show the result summary right away. */
+    /** Plays the full-screen showcase for these draws, then comes back here ({@link #onMythicDone()}). */
+    protected void showMythic(List<Integer> drawIndices, boolean atEnd) {
+        List<Draw> draws = new ArrayList<>();
+        for (int i : drawIndices) {
+            showcased |= 1L << i;
+            draws.add(round.draws.get(i));
+        }
+        mythicAtEnd = atEnd;
+        minecraft.setScreen(new MythicScreen(this, draws));
+    }
+
+    /** Back from the mythic showcase. */
     void afterMythic() {
-        if (finished && round.won()) {
+        if (mythicAtEnd && finished && round.won()) {
+            // the ticket was already done: show the result summary right away
             summaryAt = ticks;
             summaryShownAt = -1;
             summaryHidden = false;
             summaryTilesSounded = 0;
         }
+        onMythicDone();
+    }
+
+    /** Style hook: the showcase started by {@link #showMythic} has ended. */
+    protected void onMythicDone() {
     }
 
     protected boolean isRevealed(int bit) {
@@ -616,9 +646,9 @@ public abstract class PlayScreen extends Screen {
         // a freshly revealed mythic prize gets its full-screen moment before the summary
         if (finished && !mythicPlayed && finishedAt > -10_000 && ticks - finishedAt >= mythicDelay()) {
             mythicPlayed = true;
-            List<Draw> mythics = mythics();
-            if (!mythics.isEmpty()) {
-                minecraft.setScreen(new MythicScreen(this, mythics));
+            List<Integer> pending = pendingMythics();
+            if (!pending.isEmpty()) {
+                showMythic(pending, true);
                 return;
             }
         }

@@ -49,6 +49,7 @@ public class CardScreen extends PlayScreen {
         // a fresh ticket is dealt from the deck; a reopened one is already on the table
         dealStart = revealed == 0 ? ticks + DEAL_DELAY : -1;
         dealtSounded = 0;
+        pendingMythic = -1;
     }
 
     private boolean dealing() {
@@ -134,11 +135,31 @@ public class CardScreen extends PlayScreen {
     }
 
     private void flip(int i) {
-        if (isRevealed(i) || flipTick[i] >= 0) return;
+        if (isRevealed(i) || flipTick[i] >= 0 || pendingMythic >= 0) return;
         queue.remove(i);
+        if (isMythic(i)) {
+            // a mythic card is revealed by its full-screen showcase instead of a flip; it lands face-up after
+            pendingMythic = i;
+            showMythic(java.util.List.of(i), false);
+            return;
+        }
         flipTick[i] = ticks;
         play(SoundEvents.BOOK_PAGE_TURN, rare(i) ? 0.8F : 1.3F, 0.8F);
         if (rare(i)) play(SoundEvents.AMETHYST_BLOCK_RESONATE, 1.0F, 0.9F);
+    }
+
+    /** Card whose mythic showcase is playing (-1 = none). */
+    private int pendingMythic = -1;
+
+    @Override
+    protected void onMythicDone() {
+        if (pendingMythic < 0) return;
+        int i = pendingMythic;
+        pendingMythic = -1;
+        flipTick[i] = ticks - flipDuration(i); // already "turned": drawn face-up from now on
+        lastQueued = ticks;                    // a short beat before "flip all" continues
+        landed(i);
+        rebuildWidgets();
     }
 
     private void landed(int i) {
