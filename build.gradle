@@ -47,6 +47,14 @@ neoForge {
             systemProperty 'lottery.record', 'true'
             programArguments.addAll '--quickPlaySingleplayer', 'lottery-demo'
         }
+        // Records an admin configuring a gacha pool through the real GUIs and pulling from it
+        // (run/screenshots/cfg_*, every 2nd tick).
+        recordConfigClient {
+            client()
+            sourceSet = sourceSets.gametest
+            systemProperty 'lottery.configdemo', 'true'
+            programArguments.addAll '--quickPlaySingleplayer', 'lottery-demo'
+        }
         gameTestServer {
             type = 'gameTestServer'
             // own directory so test ticket types never end up in the dev world's ledger (run/world)

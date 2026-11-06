@@ -38,6 +38,8 @@ public class TerminalScreen extends Screen {
     private static final int TAB_BASIC = 0, TAB_POOLS = 1, TAB_STYLE = 2, TAB_HUB = 3, TAB_W = 60;
     /** Gacha tab: label column width; settings end at colAX + HUB_LABEL_W + 105, the status column starts after. */
     private static final int HUB_LABEL_W = 40, HUB_SETTINGS_W = HUB_LABEL_W + 105 + 10;
+    /** Style tab: its widgets end at colAX + 160. */
+    private static final int STYLE_SETTINGS_W = 170;
     private static final java.time.format.DateTimeFormatter DATE = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
     private static final int S_TYPES = 0, S_POOLS = 1, S_ITEMS = 2, S_RESULTS = 3;
 
@@ -65,7 +67,7 @@ public class TerminalScreen extends Screen {
     private int typeRows;
     private int colAX, colAW, colBX, colBW;
     private int poolY, poolRows, itemY, itemRows, itemEditY, searchY, resultY, resultCols, resultRows;
-    private int previewY, previewH;
+    private int previewY, previewH, prevX, prevW;
 
     private EditBox nameBox, emptyBox, poolNameBox, poolWeightBox, itemWeightBox, itemMinBox, itemMaxBox, searchBox, countBox;
     private EditBox drawsBox, winCountBox, colsBox, rowsBox, rangeBox, spinBox, cardColsBox, pityCountBox;
@@ -184,6 +186,9 @@ public class TerminalScreen extends Screen {
 
         // style tab preview
         previewY = ct + 18;
+        // style tab: settings use a fixed-width column, the preview takes the rest (never overlapping)
+        prevX = colAX + STYLE_SETTINGS_W;
+        prevW = cx + cw - 6 - prevX;
         previewH = Mth.clamp((cb - ct) / 2 - 10, 60, 120);
     }
 
@@ -1039,7 +1044,7 @@ public class TerminalScreen extends Screen {
 
     /** Style tab, right column: a miniature of the ticket and what the settings mean. */
     private void renderPreview(GuiGraphics g) {
-        int x0 = colBX, pw = colBW, ph = previewH, y0 = previewY;
+        int x0 = prevX, pw = prevW, ph = previewH, y0 = previewY;
         g.drawString(font, Component.translatable("gui.lottery.terminal.preview"), x0, ct + 6, C_ACCENT, false);
         g.fill(x0, y0, x0 + pw, y0 + ph, C_INSET);
         PlayStyle s = edit.playStyle();
@@ -1080,7 +1085,8 @@ public class TerminalScreen extends Screen {
             case CARDS -> {
                 int per = Math.min(clamp(edit.cardCols, 1, TicketType.MAX_COLS), draws);
                 int rows = (draws + per - 1) / per;
-                int ch = Math.min(40, (ph - 10 - (rows - 1) * 4) / rows), cwd = ch * 3 / 4;
+                int cwd = Math.max(4, Math.min(30, Math.min((ph - 10 - (rows - 1) * 4) / rows * 3 / 4, (pw - 6) / per - 4)));
+                int ch = cwd * 4 / 3;
                 for (int i = 0; i < draws; i++) {
                     int r = i / per, c = i % per;
                     int inRow = Math.min(per, draws - r * per);
@@ -1120,7 +1126,7 @@ public class TerminalScreen extends Screen {
     private int previewLine(GuiGraphics g, Component text, int y, int color) {
         if (y + 9 > cb) return y;
         // keep the tier colours inside the text while still clipping to the column
-        g.drawString(font, Language.getInstance().getVisualOrder(font.substrByWidth(text, colBW)), colBX, y, color, false);
+        g.drawString(font, Language.getInstance().getVisualOrder(font.substrByWidth(text, prevW)), prevX, y, color, false);
         return y + 11;
     }
 
