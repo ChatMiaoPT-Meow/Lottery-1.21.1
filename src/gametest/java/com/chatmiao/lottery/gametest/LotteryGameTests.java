@@ -388,6 +388,156 @@ public class LotteryGameTests {
         h.succeed();
     }
 
+    // ------------------------------------------------------------------ gacha pools (卡池) + vouchers
+
+    private static com.chatmiao.lottery.data.VoucherType voucher(GameTestHelper h, String name) {
+        com.chatmiao.lottery.data.VoucherType v = new com.chatmiao.lottery.data.VoucherType();
+        v.name = name;
+        return LotteryData.get(h.getLevel().getServer()).saveVoucher(v);
+    }
+
+    private static TicketType hubPool(GameTestHelper h, int voucherId, int delivery) {
+        TicketType t = new TicketType();
+        t.name = "卡池测试";
+        t.style = PlayStyle.CARDS.id;
+        t.emptyWeight = 0;
+        t.pools.add(tiered(pool("C", 1, new ItemStack(Items.IRON_INGOT), 1, 2, 2), 0));
+        t.inHub = true;
+        t.voucherId = voucherId;
+        t.costSingle = 1;
+        t.multiCount = 10;
+        t.costMulti = 9;
+        t.delivery = delivery;
+        return LotteryData.get(h.getLevel().getServer()).saveType(t);
+    }
+
+    private static int countVouchers(ServerPlayer p, int voucherId) {
+        int n = 0;
+        for (ItemStack s : p.getInventory().items) if (com.chatmiao.lottery.item.VoucherItem.typeOf(s) == voucherId) n += s.getCount();
+        return n;
+    }
+
+    /** Pay with vouchers, lock the result, collect prizes directly; double pulls and replays are harmless. */
+    @GameTest(template = "empty")
+    public static void hubPullAndCollect(GameTestHelper h) {
+        LotteryData data = LotteryData.get(h.getLevel().getServer());
+        var v = voucher(h, "测试券");
+        TicketType type = hubPool(h, v.id, TicketType.DELIVER_DIRECT);
+        ServerPlayer player = player(h);
+        player.getInventory().add(com.chatmiao.lottery.item.VoucherItem.create(v.id, 12));
+
+        com.chatmiao.lottery.logic.HubService.pull(player, type.id, true);
+        var s = data.session(player.getUUID());
+        h.assertTrue(s != null && s.round.draws.size() == 10 && s.multi, "a 10-pull session must be open");
+        h.assertTrue(countVouchers(player, v.id) == 3, "10-pull costs 9, left " + countVouchers(player, v.id));
+        h.assertTrue(countItem(player, Items.IRON_INGOT) == 0, "prizes are only handed out when collected");
+
+        // a second click while the pull is open neither charges nor re-rolls
+        com.chatmiao.lottery.logic.HubService.pull(player, type.id, true);
+        h.assertTrue(data.session(player.getUUID()) == s && countVouchers(player, v.id) == 3, "double pull must be ignored");
+
+        com.chatmiao.lottery.logic.HubService.reveal(player, s.round.roundId, -1L);
+        h.assertTrue(s.round.revealedMask == s.round.allMask(), "reveal clipped to the cards");
+        com.chatmiao.lottery.logic.HubService.finish(player, s.round.roundId, false);
+        h.assertTrue(data.session(player.getUUID()) == null, "collected session must be closed");
+        h.assertTrue(countItem(player, Items.IRON_INGOT) == 20, "10 draws × 2 iron, got " + countItem(player, Items.IRON_INGOT));
+        com.chatmiao.lottery.logic.HubService.finish(player, s.round.roundId, false);
+        h.assertTrue(countItem(player, Items.IRON_INGOT) == 20, "a replayed finish must not pay twice");
+        h.assertTrue(winningTickets(player).isEmpty(), "direct delivery gives no winning ticket");
+
+        var hist = data.history(player.getUUID());
+        h.assertTrue(hist.size() == 1 && hist.get(0).draws == 10 && hist.get(0).wins.size() == 10, "history must record the pull");
+        h.assertTrue(data.voucher(v.id).spent == 9 && type.scratched == 1 && type.wins == 1, "stats");
+
+        // single pull, then "再抽一次" pays and rolls the next one right away
+        com.chatmiao.lottery.logic.HubService.pull(player, type.id, false);
+        var s2 = data.session(player.getUUID());
+        h.assertTrue(s2 != null && s2.round.draws.size() == 1 && countVouchers(player, v.id) == 2, "single pull costs 1");
+        com.chatmiao.lottery.logic.HubService.finish(player, s2.round.roundId, true);
+        var s3 = data.session(player.getUUID());
+        h.assertTrue(s3 != null && s3 != s2 && countVouchers(player, v.id) == 1, "again must start a new paid pull");
+        h.assertTrue(countItem(player, Items.IRON_INGOT) == 22, "first single pull collected");
+
+        // not enough vouchers: nothing happens
+        com.chatmiao.lottery.logic.HubService.finish(player, s3.round.roundId, false);
+        com.chatmiao.lottery.logic.HubService.pull(player, type.id, true);
+        h.assertTrue(data.session(player.getUUID()) == null && countVouchers(player, v.id) == 1, "a 10-pull needs 9 vouchers");
+
+        // the pending pull survives a save/load round trip unchanged
+        com.chatmiao.lottery.logic.HubService.pull(player, type.id, false);
+        var pending = data.session(player.getUUID());
+        var provider = h.getLevel().registryAccess();
+        var copy = com.chatmiao.lottery.logic.HubSession.load(pending.save(provider), provider);
+        h.assertTrue(copy.round.roundId == pending.round.roundId && copy.round.draws.size() == 1 && !copy.multi, "session NBT round trip");
+        h.succeed();
+    }
+
+    /** Closed pools (not listed, no/disabled voucher, before start, after end, wrong weekday) can't be pulled. */
+    @GameTest(template = "empty")
+    public static void hubSchedule(GameTestHelper h) {
+        LotteryData data = LotteryData.get(h.getLevel().getServer());
+        var v = voucher(h, "排期券");
+        TicketType type = hubPool(h, v.id, TicketType.DELIVER_DIRECT);
+        long now = System.currentTimeMillis();
+        java.time.ZoneId zone = java.time.ZoneId.systemDefault();
+        h.assertTrue(type.hubStatus(now, zone, true) == TicketType.HubStatus.OPEN, "open by default");
+        h.assertTrue(type.hubStatus(now, zone, false) == TicketType.HubStatus.NO_VOUCHER, "needs an enabled voucher");
+        type.startTime = now + 3_600_000;
+        h.assertTrue(type.hubStatus(now, zone, true) == TicketType.HubStatus.NOT_STARTED, "before start");
+        type.startTime = 0;
+        type.endTime = now - 1;
+        h.assertTrue(type.hubStatus(now, zone, true) == TicketType.HubStatus.ENDED, "after end");
+        type.endTime = 0;
+        int today = java.time.Instant.ofEpochMilli(now).atZone(zone).getDayOfWeek().getValue() - 1;
+        type.weekMask = 0x7F & ~(1 << today);
+        h.assertTrue(type.hubStatus(now, zone, true) == TicketType.HubStatus.CLOSED_TODAY, "not today");
+        type.weekMask = 1 << today;
+        h.assertTrue(type.hubStatus(now, zone, true) == TicketType.HubStatus.OPEN, "today only");
+
+        // pulling a closed pool takes nothing
+        ServerPlayer player = player(h);
+        player.getInventory().add(com.chatmiao.lottery.item.VoucherItem.create(v.id, 5));
+        type.endTime = now - 1;
+        com.chatmiao.lottery.logic.HubService.pull(player, type.id, false);
+        h.assertTrue(data.session(player.getUUID()) == null && countVouchers(player, v.id) == 5, "closed pool must not charge");
+        type.endTime = 0;
+        v.enabled = false;
+        com.chatmiao.lottery.logic.HubService.pull(player, type.id, false);
+        h.assertTrue(data.session(player.getUUID()) == null && countVouchers(player, v.id) == 5, "disabled voucher must not charge");
+        v.enabled = true;
+        // vouchers of another type don't count
+        var other = voucher(h, "别的券");
+        player.getInventory().clearContent();
+        player.getInventory().add(com.chatmiao.lottery.item.VoucherItem.create(other.id, 5));
+        com.chatmiao.lottery.logic.HubService.pull(player, type.id, false);
+        h.assertTrue(data.session(player.getUUID()) == null && countVouchers(player, other.id) == 5, "wrong voucher type must not pay");
+
+        // an old type (no hub settings) is never listed
+        TicketType legacy = TicketType.load(new TicketType().save(h.getLevel().registryAccess()), h.getLevel().registryAccess());
+        h.assertTrue(!legacy.inHub && legacy.hubStatus(now, zone, true) == TicketType.HubStatus.NOT_LISTED, "legacy types stay off the gacha");
+        h.succeed();
+    }
+
+    /** Pools set to "winning ticket" hand out one ticket for the pull, redeemable once at the station. */
+    @GameTest(template = "empty")
+    public static void hubTicketDelivery(GameTestHelper h) {
+        LotteryData data = LotteryData.get(h.getLevel().getServer());
+        var v = voucher(h, "票券");
+        TicketType type = hubPool(h, v.id, TicketType.DELIVER_TICKET);
+        ServerPlayer player = player(h);
+        BlockPos station = h.absolutePos(new BlockPos(2, 1, 0));
+        h.setBlock(new BlockPos(2, 1, 0), ModRegistry.REDEEM_STATION.get());
+        player.getInventory().add(com.chatmiao.lottery.item.VoucherItem.create(v.id, 9));
+        com.chatmiao.lottery.logic.HubService.pull(player, type.id, true);
+        var s = data.session(player.getUUID());
+        h.assertTrue(s != null && !s.round.winId.isEmpty(), "ticket delivery records a win id at pull time");
+        com.chatmiao.lottery.logic.HubService.finish(player, s.round.roundId, false);
+        h.assertTrue(countItem(player, Items.IRON_INGOT) == 0 && winningTickets(player).size() == 1, "one winning ticket, no items yet");
+        RedeemService.redeem(player, station, List.of(s.round.winId));
+        h.assertTrue(countItem(player, Items.IRON_INGOT) == 20, "redeeming pays all 10 prizes");
+        h.succeed();
+    }
+
     private static TicketType.Pool tiered(TicketType.Pool p, int tier) {
         p.tier = tier;
         return p;

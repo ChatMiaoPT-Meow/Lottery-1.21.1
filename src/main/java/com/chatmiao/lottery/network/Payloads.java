@@ -2,7 +2,11 @@ package com.chatmiao.lottery.network;
 
 import com.chatmiao.lottery.LotteryMod;
 import com.chatmiao.lottery.data.Prize;
+import com.chatmiao.lottery.data.HubEntry;
+import com.chatmiao.lottery.data.PullRecord;
 import com.chatmiao.lottery.data.TicketType;
+import com.chatmiao.lottery.data.VoucherNames;
+import com.chatmiao.lottery.data.VoucherType;
 import com.chatmiao.lottery.logic.ScratchRound;
 import io.netty.buffer.ByteBuf;
 import net.minecraft.core.BlockPos;
@@ -40,13 +44,14 @@ public final class Payloads {
         }
     }
 
-    /** Opens (or refreshes) the terminal GUI with the full type list. */
-    public record OpenTerminal(List<TicketType> types, int selectId, int maxGenerate) implements CustomPacketPayload {
+    /** Opens (or refreshes) the terminal GUI with the full type list (and voucher types for the pool tab). */
+    public record OpenTerminal(List<TicketType> types, List<VoucherType> vouchers, int selectId, int maxGenerate) implements CustomPacketPayload {
         public static final Type<OpenTerminal> TYPE = payloadType("open_terminal");
         public static final StreamCodec<RegistryFriendlyByteBuf, OpenTerminal> CODEC = StreamCodec.of(
                 (buf, p) -> {
                     buf.writeVarInt(p.types.size());
                     for (TicketType t : p.types) t.write(buf);
+                    writeVouchers(buf, p.vouchers);
                     buf.writeVarInt(p.selectId);
                     buf.writeVarInt(p.maxGenerate);
                 },
@@ -54,7 +59,125 @@ public final class Payloads {
                     int n = buf.readVarInt();
                     List<TicketType> list = new ArrayList<>(n);
                     for (int i = 0; i < n; i++) list.add(TicketType.read(buf));
-                    return new OpenTerminal(list, buf.readVarInt(), buf.readVarInt());
+                    return new OpenTerminal(list, readVouchers(buf), buf.readVarInt(), buf.readVarInt());
+                });
+
+        /** Older call sites / tests that don't care about vouchers. */
+        public OpenTerminal(List<TicketType> types, int selectId, int maxGenerate) {
+            this(types, List.of(), selectId, maxGenerate);
+        }
+
+        @Override
+        public Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+    }
+
+    private static void writeVouchers(RegistryFriendlyByteBuf buf, List<VoucherType> list) {
+        buf.writeVarInt(list.size());
+        for (VoucherType v : list) v.write(buf);
+    }
+
+    private static List<VoucherType> readVouchers(RegistryFriendlyByteBuf buf) {
+        int n = Math.min(buf.readVarInt(), 1024);
+        List<VoucherType> list = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) list.add(VoucherType.read(buf));
+        return list;
+    }
+
+    /** Voucher id -> name/colour, for voucher items. Sent on login and whenever a voucher type is saved. */
+    public record SyncVouchers(Map<Integer, VoucherNames.Info> info) implements CustomPacketPayload {
+        public static final Type<SyncVouchers> TYPE = payloadType("sync_vouchers");
+        public static final StreamCodec<ByteBuf, SyncVouchers> CODEC = StreamCodec.composite(
+                ByteBufCodecs.map(HashMap::new, ByteBufCodecs.VAR_INT, StreamCodec.composite(
+                        ByteBufCodecs.STRING_UTF8, VoucherNames.Info::name,
+                        ByteBufCodecs.INT, VoucherNames.Info::color,
+                        VoucherNames.Info::new)), SyncVouchers::info,
+                SyncVouchers::new);
+
+        @Override
+        public Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+    }
+
+    /** Admin voucher screen. */
+    public record OpenVouchers(List<VoucherType> vouchers, int selectId, int maxGenerate) implements CustomPacketPayload {
+        public static final Type<OpenVouchers> TYPE = payloadType("open_vouchers");
+        public static final StreamCodec<RegistryFriendlyByteBuf, OpenVouchers> CODEC = StreamCodec.of(
+                (buf, p) -> {
+                    writeVouchers(buf, p.vouchers);
+                    buf.writeVarInt(p.selectId);
+                    buf.writeVarInt(p.maxGenerate);
+                },
+                buf -> new OpenVouchers(readVouchers(buf), buf.readVarInt(), buf.readVarInt()));
+
+        @Override
+        public Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+    }
+
+    /** The gacha screen: open pools and how many vouchers of each type the player carries. */
+    public record OpenHub(List<HubEntry> entries, Map<Integer, Integer> balances) implements CustomPacketPayload {
+        public static final Type<OpenHub> TYPE = payloadType("open_hub");
+        public static final StreamCodec<RegistryFriendlyByteBuf, OpenHub> CODEC = StreamCodec.of(
+                (buf, p) -> {
+                    buf.writeVarInt(p.entries.size());
+                    for (HubEntry e : p.entries) e.write(buf);
+                    buf.writeVarInt(p.balances.size());
+                    p.balances.forEach((k, v) -> {
+                        buf.writeVarInt(k);
+                        buf.writeVarInt(v);
+                    });
+                },
+                buf -> {
+                    int n = Math.min(buf.readVarInt(), 1024);
+                    List<HubEntry> list = new ArrayList<>(n);
+                    for (int i = 0; i < n; i++) list.add(HubEntry.read(buf));
+                    int m = Math.min(buf.readVarInt(), 1024);
+                    Map<Integer, Integer> bal = new HashMap<>();
+                    for (int i = 0; i < m; i++) bal.put(buf.readVarInt(), buf.readVarInt());
+                    return new OpenHub(list, bal);
+                });
+
+        @Override
+        public Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+    }
+
+    /** A locked gacha pull to animate. {@code direct}: prizes go to the inventory (else a winning ticket). */
+    public record HubState(ScratchRound round, boolean direct, int voucherId, int againCost, boolean canAgain) implements CustomPacketPayload {
+        public static final Type<HubState> TYPE = payloadType("hub_state");
+        public static final StreamCodec<RegistryFriendlyByteBuf, HubState> CODEC = StreamCodec.of(
+                (buf, p) -> {
+                    p.round.write(buf);
+                    buf.writeBoolean(p.direct);
+                    buf.writeVarInt(p.voucherId);
+                    buf.writeVarInt(p.againCost);
+                    buf.writeBoolean(p.canAgain);
+                },
+                buf -> new HubState(ScratchRound.read(buf), buf.readBoolean(), buf.readVarInt(), buf.readVarInt(), buf.readBoolean()));
+
+        @Override
+        public Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+    }
+
+    public record HubHistory(List<PullRecord> records) implements CustomPacketPayload {
+        public static final Type<HubHistory> TYPE = payloadType("hub_history");
+        public static final StreamCodec<RegistryFriendlyByteBuf, HubHistory> CODEC = StreamCodec.of(
+                (buf, p) -> {
+                    buf.writeVarInt(p.records.size());
+                    for (PullRecord r : p.records) r.write(buf);
+                },
+                buf -> {
+                    int n = Math.min(buf.readVarInt(), 256);
+                    List<PullRecord> list = new ArrayList<>(n);
+                    for (int i = 0; i < n; i++) list.add(PullRecord.read(buf));
+                    return new HubHistory(list);
                 });
 
         @Override
@@ -177,6 +300,83 @@ public final class Payloads {
                 BlockPos.STREAM_CODEC, Redeem::pos,
                 ByteBufCodecs.STRING_UTF8.apply(ByteBufCodecs.list(256)), Redeem::winIds,
                 Redeem::new);
+
+        @Override
+        public Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+    }
+
+    // ---- gacha / vouchers (client -> server)
+
+    /** Simple request without data: open the gacha screen / history / voucher admin / terminal. */
+    public record Request(int what) implements CustomPacketPayload {
+        public static final int HUB = 0, HISTORY = 1, VOUCHERS = 2, TERMINAL = 3;
+        public static final Type<Request> TYPE = payloadType("request");
+        public static final StreamCodec<ByteBuf, Request> CODEC = StreamCodec.composite(ByteBufCodecs.VAR_INT, Request::what, Request::new);
+
+        @Override
+        public Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+    }
+
+    public record HubPull(int typeId, boolean multi) implements CustomPacketPayload {
+        public static final Type<HubPull> TYPE = payloadType("hub_pull");
+        public static final StreamCodec<ByteBuf, HubPull> CODEC = StreamCodec.composite(
+                ByteBufCodecs.VAR_INT, HubPull::typeId,
+                ByteBufCodecs.BOOL, HubPull::multi,
+                HubPull::new);
+
+        @Override
+        public Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+    }
+
+    public record HubReveal(int roundId, long mask) implements CustomPacketPayload {
+        public static final Type<HubReveal> TYPE = payloadType("hub_reveal");
+        public static final StreamCodec<ByteBuf, HubReveal> CODEC = StreamCodec.composite(
+                ByteBufCodecs.VAR_INT, HubReveal::roundId,
+                ByteBufCodecs.VAR_LONG, HubReveal::mask,
+                HubReveal::new);
+
+        @Override
+        public Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+    }
+
+    public record HubFinish(int roundId, boolean again) implements CustomPacketPayload {
+        public static final Type<HubFinish> TYPE = payloadType("hub_finish");
+        public static final StreamCodec<ByteBuf, HubFinish> CODEC = StreamCodec.composite(
+                ByteBufCodecs.VAR_INT, HubFinish::roundId,
+                ByteBufCodecs.BOOL, HubFinish::again,
+                HubFinish::new);
+
+        @Override
+        public Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+    }
+
+    public record SaveVoucher(VoucherType voucher) implements CustomPacketPayload {
+        public static final Type<SaveVoucher> TYPE = payloadType("save_voucher");
+        public static final StreamCodec<RegistryFriendlyByteBuf, SaveVoucher> CODEC = StreamCodec.of(
+                (buf, p) -> p.voucher.write(buf), buf -> new SaveVoucher(VoucherType.read(buf)));
+
+        @Override
+        public Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+    }
+
+    public record GenerateVoucher(int voucherId, int count) implements CustomPacketPayload {
+        public static final Type<GenerateVoucher> TYPE = payloadType("generate_voucher");
+        public static final StreamCodec<ByteBuf, GenerateVoucher> CODEC = StreamCodec.composite(
+                ByteBufCodecs.VAR_INT, GenerateVoucher::voucherId,
+                ByteBufCodecs.VAR_INT, GenerateVoucher::count,
+                GenerateVoucher::new);
 
         @Override
         public Type<? extends CustomPacketPayload> type() {

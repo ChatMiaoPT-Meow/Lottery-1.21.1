@@ -67,18 +67,32 @@ public final class CommonEvents {
     @SubscribeEvent
     public static void onLogin(PlayerEvent.PlayerLoggedInEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
-            Network.send(player, new Payloads.SyncNames(LotteryData.get(player.server).typeNames()));
+            LotteryData data = LotteryData.get(player.server);
+            Network.send(player, new Payloads.SyncNames(data.typeNames()));
+            Network.send(player, new Payloads.SyncVouchers(data.voucherInfo()));
         }
+    }
+
+    /** {@code /gacha}: open the gacha screen anywhere (also bound to a key and to right-clicking a voucher). */
+    @SubscribeEvent
+    public static void onRegisterCommands(net.neoforged.neoforge.event.RegisterCommandsEvent event) {
+        event.getDispatcher().register(net.minecraft.commands.Commands.literal("gacha").executes(ctx -> {
+            com.chatmiao.lottery.logic.HubService.open(ctx.getSource().getPlayerOrException());
+            return 1;
+        }));
     }
 
     @SubscribeEvent
     public static void onServerStarted(ServerStartedEvent event) {
-        TicketNames.replaceAll(LotteryData.get(event.getServer()).typeNames());
+        LotteryData data = LotteryData.get(event.getServer());
+        TicketNames.replaceAll(data.typeNames());
+        com.chatmiao.lottery.data.VoucherNames.replaceAll(data.voucherInfo());
     }
 
     @SubscribeEvent
     public static void onServerStopped(ServerStoppedEvent event) {
         TicketNames.clear();
+        com.chatmiao.lottery.data.VoucherNames.clear();
     }
 
     private CommonEvents() {}

@@ -35,7 +35,10 @@ import java.util.function.IntConsumer;
  */
 public class TerminalScreen extends Screen {
     private static final int LIST_W = 112, TYPE_ROW_H = 12, POOL_ROW_H = 12, ITEM_ROW_H = 18, CELL = 18;
-    private static final int TAB_BASIC = 0, TAB_POOLS = 1, TAB_STYLE = 2;
+    private static final int TAB_BASIC = 0, TAB_POOLS = 1, TAB_STYLE = 2, TAB_HUB = 3, TAB_W = 60;
+    /** Gacha tab: label column width; settings end at colAX + HUB_LABEL_W + 105, the status column starts after. */
+    private static final int HUB_LABEL_W = 40, HUB_SETTINGS_W = HUB_LABEL_W + 105 + 10;
+    private static final java.time.format.DateTimeFormatter DATE = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
     private static final int S_TYPES = 0, S_POOLS = 1, S_ITEMS = 2, S_RESULTS = 3;
 
     private static final int C_PANEL = 0xF0202329, C_COL = 0xFF2B2F36, C_BORDER = 0xFF4A505C, C_INSET = 0xFF1A1D22,
@@ -69,6 +72,12 @@ public class TerminalScreen extends Screen {
     private Button enableBtn, addPoolBtn, delPoolBtn, delItemBtn, offhandBtn, generateBtn, saveBtn;
     private Button poolTierBtn, styleBtn, rareBtn, pityTierBtn, guarTierBtn;
     private final List<TabButton> tabs = new ArrayList<>();
+    // gacha pool tab
+    private List<com.chatmiao.lottery.data.VoucherType> vouchers = new ArrayList<>();
+    private Button hubBtn, voucherBtn, deliveryBtn;
+    private EditBox costSingleBox, multiCountBox, costMultiBox, startBox, endBox;
+    private final Button[] weekBtns = new Button[7];
+    private boolean badStart, badEnd;
 
     private record IndexEntry(ItemStack stack, String name, String id) {}
 
@@ -86,6 +95,7 @@ public class TerminalScreen extends Screen {
 
     private void apply(Payloads.OpenTerminal data) {
         types = new ArrayList<>(data.types());
+        vouchers = new ArrayList<>(data.vouchers());
         maxGenerate = data.maxGenerate();
         TicketType target = find(data.selectId());
         if (target != null) {
@@ -151,7 +161,7 @@ public class TerminalScreen extends Screen {
         H = Mth.clamp(height - 24, 238, 340);
         left = (width - W) / 2;
         top = (height - H) / 2;
-        typeRows = (H - 50) / TYPE_ROW_H;
+        typeRows = (H - 70) / TYPE_ROW_H;
         cx = left + LIST_W + 12;
         cw = left + W - 6 - cx;
         ct = top + 24;
@@ -181,10 +191,11 @@ public class TerminalScreen extends Screen {
     protected void init() {
         layout();
         tabs.clear();
-        String[] tabKeys = {"gui.lottery.terminal.tab_basic", "gui.lottery.terminal.tab_pools", "gui.lottery.terminal.tab_style"};
+        String[] tabKeys = {"gui.lottery.terminal.tab_basic", "gui.lottery.terminal.tab_pools", "gui.lottery.terminal.tab_style",
+                "gui.lottery.terminal.tab_hub"};
         for (int i = 0; i < tabKeys.length; i++) {
             int index = i;
-            TabButton t = new TabButton(cx + i * 70, top + 6, 68, 18, Component.translatable(tabKeys[i]), index, b -> {
+            TabButton t = new TabButton(cx + i * (TAB_W + 2), top + 6, TAB_W, 18, Component.translatable(tabKeys[i]), index, b -> {
                 tab = index;
                 refreshWidgets();
             });
@@ -249,7 +260,30 @@ public class TerminalScreen extends Screen {
             touch();
         });
 
+        // ---- gacha pool tab (settings left, status preview right)
+        int hx = colAX + HUB_LABEL_W, h0 = ct + 22;
+        hubBtn = cycle(colAX, h0, HUB_LABEL_W + 105, () -> { edit.inHub = !edit.inHub; touch(); });
+        voucherBtn = cycle(hx, h0 + 18, 105, this::cycleVoucher);
+        costSingleBox = numBox(hx, h0 + 36, 30, v -> { edit.costSingle = v; touch(); });
+        multiCountBox = numBox(hx, h0 + 54, 26, v -> { edit.multiCount = v; touch(); });
+        costMultiBox = numBox(hx + 44, h0 + 54, 30, v -> { edit.costMulti = v; touch(); });
+        startBox = textBox(hx, h0 + 72, 105, 16, s -> { badStart = !parseTime(s, true); touch(); });
+        endBox = textBox(hx, h0 + 90, 105, 16, s -> { badEnd = !parseTime(s, false); touch(); });
+        startBox.setHint(Component.translatable("gui.lottery.terminal.time_hint").withStyle(net.minecraft.ChatFormatting.DARK_GRAY));
+        endBox.setHint(Component.translatable("gui.lottery.terminal.time_hint").withStyle(net.minecraft.ChatFormatting.DARK_GRAY));
+        for (int d = 0; d < 7; d++) {
+            int day = d;
+            weekBtns[d] = cycle(hx + d * 15, h0 + 108, 14, () -> { edit.weekMask ^= 1 << day; touch(); });
+        }
+        deliveryBtn = cycle(hx, h0 + 126, 105, () -> {
+            edit.delivery = edit.delivery == TicketType.DELIVER_TICKET ? TicketType.DELIVER_DIRECT : TicketType.DELIVER_TICKET;
+            touch();
+        });
+
         // ---- always visible
+        addRenderableWidget(Button.builder(Component.translatable("gui.lottery.terminal.vouchers"),
+                        b -> PacketDistributor.sendToServer(new Payloads.Request(Payloads.Request.VOUCHERS)))
+                .bounds(left + 4, top + H - 46, LIST_W, 16).build());
         addRenderableWidget(Button.builder(Component.translatable("gui.lottery.terminal.new"), b -> clickNew())
                 .bounds(left + 4, top + H - 24, LIST_W, 16).build());
         int bx = left + W - 6;
@@ -262,6 +296,47 @@ public class TerminalScreen extends Screen {
 
         refreshWidgets();
         updateResults();
+    }
+
+    private void cycleVoucher() {
+        // none -> each voucher type in order -> none
+        int next = 0;
+        boolean pick = edit.voucherId == 0;
+        for (com.chatmiao.lottery.data.VoucherType v : vouchers) {
+            if (pick) {
+                next = v.id;
+                break;
+            }
+            if (v.id == edit.voucherId) pick = true;
+        }
+        edit.voucherId = next;
+        touch();
+    }
+
+    /** Parses a start/end box into {@link #edit}; empty = unbounded. @return false if the text is not a valid time */
+    private boolean parseTime(String s, boolean start) {
+        long value;
+        if (s == null || s.isBlank()) {
+            value = 0;
+        } else {
+            try {
+                value = java.time.LocalDateTime.parse(s.strip(), DATE).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli();
+            } catch (java.time.format.DateTimeParseException e) {
+                return false;
+            }
+        }
+        if (start) edit.startTime = value;
+        else edit.endTime = value;
+        return true;
+    }
+
+    private static String formatTime(long millis) {
+        return millis <= 0 ? "" : DATE.format(java.time.Instant.ofEpochMilli(millis).atZone(java.time.ZoneId.systemDefault()));
+    }
+
+    private com.chatmiao.lottery.data.VoucherType voucherOf(int id) {
+        for (com.chatmiao.lottery.data.VoucherType v : vouchers) if (v.id == id) return v;
+        return null;
     }
 
     private Button small(Component text, int x, int y, int w, Runnable action) {
@@ -352,6 +427,28 @@ public class TerminalScreen extends Screen {
         guarTierBtn.setMessage(edit.guaranteeTier < 0
                 ? Component.translatable("gui.lottery.terminal.off")
                 : Component.translatable("gui.lottery.terminal.tier_up", Tier.name(edit.guaranteeTier)));
+
+        // ---- gacha pool
+        boolean hub = tab == TAB_HUB;
+        hubBtn.visible = voucherBtn.visible = costSingleBox.visible = multiCountBox.visible = costMultiBox.visible = hub;
+        startBox.visible = endBox.visible = deliveryBtn.visible = hub;
+        for (Button b : weekBtns) b.visible = hub;
+        hubBtn.setMessage(Component.translatable(edit.inHub ? "gui.lottery.terminal.hub_on" : "gui.lottery.terminal.hub_off"));
+        com.chatmiao.lottery.data.VoucherType v = voucherOf(edit.voucherId);
+        voucherBtn.setMessage(v == null ? Component.translatable("gui.lottery.terminal.no_voucher")
+                : Component.literal(v.name).withColor(v.color));
+        costSingleBox.setValue(String.valueOf(edit.costSingle));
+        multiCountBox.setValue(String.valueOf(edit.multiCount));
+        costMultiBox.setValue(String.valueOf(edit.costMulti));
+        if (!startBox.isFocused()) startBox.setValue(formatTime(edit.startTime));
+        if (!endBox.isFocused()) endBox.setValue(formatTime(edit.endTime));
+        badStart = badEnd = false;
+        for (int d = 0; d < 7; d++) {
+            boolean on = (edit.weekMask & (1 << d)) != 0;
+            weekBtns[d].setMessage(Component.translatable("gui.lottery.weekday." + d).withColor(on ? 0x7CFC7C : 0x8A8A8A));
+        }
+        deliveryBtn.setMessage(Component.translatable(edit.delivery == TicketType.DELIVER_TICKET
+                ? "gui.lottery.hub.deliver_ticket" : "gui.lottery.hub.deliver_direct"));
         loading = false;
     }
 
@@ -679,7 +776,7 @@ public class TerminalScreen extends Screen {
         Component header = edit.id > 0
                 ? Component.translatable("gui.lottery.terminal.editing_named", edit.id, edit.name)
                 : Component.translatable("gui.lottery.terminal.unsaved_new");
-        String hs = font.plainSubstrByWidth(header.getString(), cw - 220);
+        String hs = font.plainSubstrByWidth(header.getString(), Math.max(0, cw - 4 * (TAB_W + 2) - 12));
         int hx = cx + cw - font.width(hs) - (dirty ? 8 : 2);
         g.drawString(font, hs, hx, top + 11, C_ACCENT, false);
         if (dirty) g.drawString(font, "*", cx + cw - 6, top + 11, C_BAD, false);
@@ -691,6 +788,7 @@ public class TerminalScreen extends Screen {
                 renderStyleSettings(g);
                 renderPreview(g);
             }
+            case TAB_HUB -> renderHub(g);
         }
 
         // ---- bottom bar
@@ -847,6 +945,71 @@ public class TerminalScreen extends Screen {
         }
         drawScrollbar(g, S_RESULTS);
         return tooltip;
+    }
+
+    /** Gacha pool tab: labels on the left, what players will see / why it is closed on the right. */
+    private void renderHub(GuiGraphics g) {
+        int h0 = ct + 22;
+        g.drawString(font, Component.translatable("gui.lottery.terminal.tab_hub"), colAX, ct + 6, C_ACCENT, false);
+        label(g, "gui.lottery.terminal.hub_voucher", colAX, h0 + 18);
+        int hx = colAX + HUB_LABEL_W;
+        label(g, "gui.lottery.terminal.hub_single", colAX, h0 + 36);
+        g.drawString(font, Component.translatable("gui.lottery.terminal.hub_per_pull"), hx + 34, h0 + 39, C_DIM, false);
+        label(g, "gui.lottery.terminal.hub_multi", colAX, h0 + 54);
+        g.drawString(font, Component.translatable("gui.lottery.terminal.hub_multi_cost"), hx + 30, h0 + 57, C_DIM, false);
+        g.drawString(font, Component.translatable("gui.lottery.terminal.hub_per_pull"), hx + 78, h0 + 57, C_DIM, false);
+        label(g, "gui.lottery.terminal.hub_start", colAX, h0 + 72);
+        label(g, "gui.lottery.terminal.hub_end", colAX, h0 + 90);
+        if (badStart) g.drawString(font, "!", hx + 108, h0 + 75, C_BAD, false);
+        if (badEnd) g.drawString(font, "!", hx + 108, h0 + 93, C_BAD, false);
+        label(g, "gui.lottery.terminal.hub_week", colAX, h0 + 108);
+        label(g, "gui.lottery.terminal.hub_delivery", colAX, h0 + 126);
+
+        // right: status + summary (own column, wrapped, so it never runs into the settings)
+        int x = colAX + HUB_SETTINGS_W, y = ct + 6;
+        hubColX = x;
+        hubColW = cx + cw - 6 - x;
+        g.fill(x - 6, ct + 4, x - 5, cb - 4, C_BORDER);
+        g.drawString(font, Component.translatable("gui.lottery.terminal.hub_preview"), x, y, C_ACCENT, false);
+        y += 14;
+        com.chatmiao.lottery.data.VoucherType v = voucherOf(edit.voucherId);
+        TicketType.HubStatus st = edit.hubStatus(System.currentTimeMillis(), java.time.ZoneId.systemDefault(), v != null && v.enabled);
+        boolean open = st == TicketType.HubStatus.OPEN;
+        y = hubLine(g, Component.translatable("gui.lottery.terminal.hub_status." + st.name().toLowerCase(Locale.ROOT)), y, open ? 0xFF7CFC7C : C_BAD);
+        y += 4;
+        if (v != null) {
+            y = hubLine(g, Component.translatable("gui.lottery.terminal.hub_cost_single", v.name, edit.costSingle), y, C_TEXT);
+            int multi = edit.effectiveMulti();
+            if (multi > 0) {
+                y = hubLine(g, Component.translatable("gui.lottery.terminal.hub_cost_multi", multi, v.name, edit.costMulti), y, C_TEXT);
+                if (multi < edit.multiCount) {
+                    y = hubLine(g, Component.translatable("gui.lottery.terminal.w_draws", multi), y, C_BAD);
+                }
+            } else {
+                y = hubLine(g, Component.translatable("gui.lottery.terminal.hub_no_multi"), y, C_DIM);
+            }
+        }
+        y += 4;
+        y = hubLine(g, Component.translatable(edit.delivery == TicketType.DELIVER_TICKET
+                ? "gui.lottery.terminal.hub_info_ticket" : "gui.lottery.terminal.hub_info_direct"), y, C_DIM);
+        y = hubLine(g, Component.translatable("gui.lottery.terminal.hub_info_unlimited"), y, C_DIM);
+        y = hubLine(g, Component.translatable("gui.lottery.terminal.hub_info_open"), y, C_DIM);
+        if (vouchers.isEmpty()) {
+            y += 4;
+            hubLine(g, Component.translatable("gui.lottery.terminal.hub_need_voucher"), y, C_BAD);
+        }
+    }
+
+    private int hubColX, hubColW;
+
+    /** A wrapped line in the gacha tab's status column. */
+    private int hubLine(GuiGraphics g, Component text, int y, int color) {
+        for (var line : font.split(text, Math.max(40, hubColW))) {
+            if (y + 9 > cb) return y;
+            g.drawString(font, line, hubColX, y, color, false);
+            y += 10;
+        }
+        return y + 1;
     }
 
     /** Labels of the style tab (the inputs themselves are widgets). */

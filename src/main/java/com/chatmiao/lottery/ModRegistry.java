@@ -44,6 +44,10 @@ public final class ModRegistry {
     public static final DeferredHolder<DataComponentType<?>, DataComponentType<Integer>> TICKET_TYPE =
             COMPONENTS.register("ticket_type", () -> DataComponentType.<Integer>builder()
                     .persistent(Codec.INT).networkSynchronized(ByteBufCodecs.VAR_INT).build());
+    /** Voucher type on a gacha voucher. Same type => identical stacks => stackable. */
+    public static final DeferredHolder<DataComponentType<?>, DataComponentType<Integer>> VOUCHER_TYPE =
+            COMPONENTS.register("voucher_type", () -> DataComponentType.<Integer>builder()
+                    .persistent(Codec.INT).networkSynchronized(ByteBufCodecs.VAR_INT).build());
     /** Data on a winning ticket: its unique win id plus display info. */
     public static final DeferredHolder<DataComponentType<?>, DataComponentType<WinTicketData>> WIN_TICKET =
             COMPONENTS.register("win_ticket", () -> DataComponentType.<WinTicketData>builder()
@@ -73,6 +77,8 @@ public final class ModRegistry {
             () -> new ScratchTicketItem(new Item.Properties().stacksTo(64)));
     public static final DeferredItem<WinningTicketItem> WINNING_TICKET = ITEMS.register("winning_ticket",
             () -> new WinningTicketItem(new Item.Properties().stacksTo(1).rarity(Rarity.RARE)));
+    public static final DeferredItem<com.chatmiao.lottery.item.VoucherItem> VOUCHER = ITEMS.register("voucher",
+            () -> new com.chatmiao.lottery.item.VoucherItem(new Item.Properties().stacksTo(64).rarity(Rarity.UNCOMMON)));
     public static final DeferredItem<OpBlockItem> SCRATCH_TABLE_ITEM = ITEMS.register("scratch_table",
             () -> new OpBlockItem(SCRATCH_TABLE.get(), new Item.Properties()));
     public static final DeferredItem<OpBlockItem> REDEEM_STATION_ITEM = ITEMS.register("redeem_station",

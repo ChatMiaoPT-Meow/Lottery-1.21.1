@@ -28,8 +28,8 @@ public class ScratchScreen extends PlayScreen {
     private double pressX, pressY, lastX, lastY, dragDist;
     private long lastScratchSound;
 
-    public ScratchScreen(Payloads.ScratchState state) {
-        super(state);
+    public ScratchScreen(Source source, com.chatmiao.lottery.logic.ScratchRound round) {
+        super(source, round);
     }
 
     @Override

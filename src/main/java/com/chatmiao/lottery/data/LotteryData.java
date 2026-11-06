@@ -10,6 +10,7 @@ import net.minecraft.world.level.saveddata.SavedData;
 
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
@@ -30,6 +31,77 @@ public final class LotteryData extends SavedData {
     private final Map<String, WinRecord> wins = new HashMap<>();
     /** Pity counters: player -> type id -> draws in a row without a prize of the type's pity tier. */
     private final Map<UUID, Map<Integer, Integer>> pity = new HashMap<>();
+    private int nextVoucherId = 1;
+    private final TreeMap<Integer, VoucherType> vouchers = new TreeMap<>();
+    /** Paid-for but not yet collected gacha pulls, one per player. */
+    private final Map<UUID, com.chatmiao.lottery.logic.HubSession> sessions = new HashMap<>();
+    /** Gacha history per player, newest first, at most {@link #HISTORY_LIMIT} entries. */
+    private final Map<UUID, java.util.ArrayDeque<PullRecord>> history = new HashMap<>();
+    public static final int HISTORY_LIMIT = 100;
+    private int nextHubRoundId = 1;
+
+    // ---------------- vouchers ----------------
+
+    public Collection<VoucherType> vouchers() {
+        return vouchers.values();
+    }
+
+    public VoucherType voucher(int id) {
+        return vouchers.get(id);
+    }
+
+    /** Create (id <= 0) or update a voucher type. Statistics are never taken from the input. */
+    public VoucherType saveVoucher(VoucherType input) {
+        input.sanitize();
+        VoucherType stored = input.copy();
+        VoucherType old = input.id > 0 ? vouchers.get(input.id) : null;
+        if (old == null) {
+            stored.id = nextVoucherId++;
+            stored.issued = stored.spent = 0;
+        } else {
+            stored.issued = old.issued;
+            stored.spent = old.spent;
+        }
+        vouchers.put(stored.id, stored);
+        VoucherNames.replaceAll(voucherInfo());
+        setDirty();
+        return stored;
+    }
+
+    public Map<Integer, VoucherNames.Info> voucherInfo() {
+        Map<Integer, VoucherNames.Info> map = new HashMap<>();
+        for (VoucherType v : vouchers.values()) map.put(v.id, new VoucherNames.Info(v.name, v.color));
+        return map;
+    }
+
+    // ---------------- gacha sessions / history ----------------
+
+    public com.chatmiao.lottery.logic.HubSession session(UUID player) {
+        return sessions.get(player);
+    }
+
+    public void setSession(UUID player, com.chatmiao.lottery.logic.HubSession session) {
+        if (session == null) sessions.remove(player);
+        else sessions.put(player, session);
+        setDirty();
+    }
+
+    public int nextHubRoundId() {
+        setDirty();
+        return nextHubRoundId++;
+    }
+
+    public void addHistory(UUID player, PullRecord record) {
+        java.util.ArrayDeque<PullRecord> h = history.computeIfAbsent(player, k -> new java.util.ArrayDeque<>());
+        h.addFirst(record);
+        while (h.size() > HISTORY_LIMIT) h.removeLast();
+        setDirty();
+    }
+
+    public List<PullRecord> history(UUID player) {
+        java.util.ArrayDeque<PullRecord> h = history.get(player);
+        return h == null ? List.of() : new java.util.ArrayList<>(h);
+    }
 
     public static LotteryData get(MinecraftServer server) {
         return server.overworld().getDataStorage().computeIfAbsent(
@@ -135,7 +207,31 @@ public final class LotteryData extends SavedData {
             int n = p.getInt("count");
             if (n > 0) data.pity.computeIfAbsent(p.getUUID("player"), k -> new HashMap<>()).put(p.getInt("type"), n);
         }
+        data.nextVoucherId = Math.max(1, tag.getInt("nextVoucherId"));
+        for (Tag t : tag.getList("vouchers", Tag.TAG_COMPOUND)) {
+            VoucherType v = VoucherType.load((CompoundTag) t);
+            data.vouchers.put(v.id, v);
+            data.nextVoucherId = Math.max(data.nextVoucherId, v.id + 1);
+        }
+        data.nextHubRoundId = Math.max(1, tag.getInt("nextHubRoundId"));
+        for (Tag t : tag.getList("sessions", Tag.TAG_COMPOUND)) {
+            CompoundTag s = (CompoundTag) t;
+            if (!s.hasUUID("player")) continue;
+            try {
+                data.sessions.put(s.getUUID("player"), com.chatmiao.lottery.logic.HubSession.load(s.getCompound("session"), provider));
+            } catch (RuntimeException e) {
+                com.chatmiao.lottery.LotteryMod.LOGGER.error("Dropping unreadable gacha session of {}", s.getUUID("player"), e);
+            }
+        }
+        for (Tag t : tag.getList("history", Tag.TAG_COMPOUND)) {
+            CompoundTag h = (CompoundTag) t;
+            if (!h.hasUUID("player")) continue;
+            java.util.ArrayDeque<PullRecord> list = new java.util.ArrayDeque<>();
+            for (Tag r : h.getList("records", Tag.TAG_COMPOUND)) list.addLast(PullRecord.load((CompoundTag) r, provider));
+            data.history.put(h.getUUID("player"), list);
+        }
         TicketNames.replaceAll(data.typeNames());
+        VoucherNames.replaceAll(data.voucherInfo());
         return data;
     }
 
@@ -159,6 +255,29 @@ public final class LotteryData extends SavedData {
             }
         }
         tag.put("pity", pityList);
+        tag.putInt("nextVoucherId", nextVoucherId);
+        ListTag voucherList = new ListTag();
+        for (VoucherType v : vouchers.values()) voucherList.add(v.save());
+        tag.put("vouchers", voucherList);
+        tag.putInt("nextHubRoundId", nextHubRoundId);
+        ListTag sessionList = new ListTag();
+        for (Map.Entry<UUID, com.chatmiao.lottery.logic.HubSession> e : sessions.entrySet()) {
+            CompoundTag s = new CompoundTag();
+            s.putUUID("player", e.getKey());
+            s.put("session", e.getValue().save(provider));
+            sessionList.add(s);
+        }
+        tag.put("sessions", sessionList);
+        ListTag historyList = new ListTag();
+        for (Map.Entry<UUID, java.util.ArrayDeque<PullRecord>> e : history.entrySet()) {
+            CompoundTag h = new CompoundTag();
+            h.putUUID("player", e.getKey());
+            ListTag records = new ListTag();
+            for (PullRecord r : e.getValue()) records.add(r.save(provider));
+            h.put("records", records);
+            historyList.add(h);
+        }
+        tag.put("history", historyList);
         return tag;
     }
 }

@@ -62,10 +62,57 @@ public final class TicketType {
     /** Multi-draw tickets contain at least one prize of tier >= this. -1 = off. */
     public int guaranteeTier = -1;
 
+    // ---- gacha pool (卡池): pulled with vouchers from the gacha screen instead of physical tickets
+    public static final int DELIVER_DIRECT = 0, DELIVER_TICKET = 1;
+    public static final int MAX_COST = 10_000;
+    /** Shown in the gacha screen (when its schedule allows). */
+    public boolean inHub;
+    /** Voucher type a pull costs; 0 = none chosen (pool can't be pulled). */
+    public int voucherId;
+    /** Vouchers for a single pull (one draw). */
+    public int costSingle = 1;
+    /** Draws of a multi pull (0 = no multi pull) and its voucher cost. */
+    public int multiCount = 10;
+    public int costMulti = 10;
+    /** Open window in epoch millis; 0 = unbounded. */
+    public long startTime, endTime;
+    /** Weekdays the pool is open, bit 0 = Monday … bit 6 = Sunday; 0 = every day. */
+    public int weekMask;
+    /** {@link #DELIVER_DIRECT}: prizes go straight to the inventory; {@link #DELIVER_TICKET}: a winning ticket. */
+    public int delivery = DELIVER_DIRECT;
+
     // statistics, maintained by the server only
     public int issued;
     public int scratched;
     public int wins;
+
+    public enum HubStatus { OPEN, NOT_LISTED, DISABLED, NO_VOUCHER, NOT_STARTED, ENDED, CLOSED_TODAY }
+
+    /**
+     * Whether the pool can be pulled right now.
+     *
+     * @param voucherOk the chosen voucher type exists and is enabled
+     */
+    public HubStatus hubStatus(long nowMillis, java.time.ZoneId zone, boolean voucherOk) {
+        if (!inHub) return HubStatus.NOT_LISTED;
+        if (!enabled) return HubStatus.DISABLED;
+        if (voucherId <= 0 || !voucherOk) return HubStatus.NO_VOUCHER;
+        if (startTime > 0 && nowMillis < startTime) return HubStatus.NOT_STARTED;
+        if (endTime > 0 && nowMillis >= endTime) return HubStatus.ENDED;
+        if (weekMask != 0) {
+            int dow = java.time.Instant.ofEpochMilli(nowMillis).atZone(zone).getDayOfWeek().getValue() - 1; // Monday = 0
+            if ((weekMask & (1 << dow)) == 0) return HubStatus.CLOSED_TODAY;
+        }
+        return HubStatus.OPEN;
+    }
+
+    /** Draws a multi pull really gets (capped by the style), or 0 when multi pulls are off. */
+    public int effectiveMulti() {
+        if (multiCount <= 1 || costMulti <= 0) return 0;
+        PlayStyle s = playStyle();
+        int max = s == PlayStyle.MATCH ? Math.min(s.maxDraws, cells()) : s.maxDraws;
+        return Math.min(multiCount, max);
+    }
 
     public static final class Pool {
         public String name = "";
@@ -194,6 +241,15 @@ public final class TicketType {
         pityCount = o.pityCount;
         pityTier = o.pityTier;
         guaranteeTier = o.guaranteeTier;
+        inHub = o.inHub;
+        voucherId = o.voucherId;
+        costSingle = o.costSingle;
+        multiCount = o.multiCount;
+        costMulti = o.costMulti;
+        startTime = o.startTime;
+        endTime = o.endTime;
+        weekMask = o.weekMask;
+        delivery = o.delivery;
     }
 
     /** Clamp everything a (trusted, but possibly buggy) client sent into sane bounds. */
@@ -259,6 +315,7 @@ public final class TicketType {
         buf.writeVarInt(pityCount);
         buf.writeVarInt(pityTier);
         buf.writeVarInt(guaranteeTier + 1);
+        writeHub(buf);
     }
 
     public static TicketType read(RegistryFriendlyByteBuf buf) {
@@ -299,6 +356,7 @@ public final class TicketType {
         t.pityCount = buf.readVarInt();
         t.pityTier = buf.readVarInt();
         t.guaranteeTier = buf.readVarInt() - 1;
+        t.readHub(buf);
         return t;
     }
 
@@ -347,6 +405,7 @@ public final class TicketType {
         st.putInt("pityTier", pityTier);
         st.putInt("guaranteeTier", guaranteeTier);
         tag.put("play", st);
+        tag.put("hub", saveHub());
         return tag;
     }
 
@@ -393,6 +452,8 @@ public final class TicketType {
             t.pityTier = st.getInt("pityTier");
             t.guaranteeTier = st.getInt("guaranteeTier");
         }
+        // types saved before gacha pools existed are simply not listed in the gacha screen
+        if (tag.contains("hub", Tag.TAG_COMPOUND)) t.loadHub(tag.getCompound("hub"));
         t.sanitizeStyleOnly();
         return t;
     }
@@ -410,5 +471,63 @@ public final class TicketType {
         pityCount = clamp(pityCount, 0, MAX_PITY);
         pityTier = Tier.clamp(pityTier);
         guaranteeTier = guaranteeTier < 0 ? -1 : Tier.clamp(guaranteeTier);
+        voucherId = Math.max(0, voucherId);
+        costSingle = clamp(costSingle, 0, MAX_COST);
+        multiCount = clamp(multiCount, 0, TicketType.MAX_COLS * TicketType.MAX_ROWS);
+        costMulti = clamp(costMulti, 0, MAX_COST);
+        startTime = Math.max(0, startTime);
+        endTime = Math.max(0, endTime);
+        weekMask &= 0x7F;
+        delivery = delivery == DELIVER_TICKET ? DELIVER_TICKET : DELIVER_DIRECT;
+    }
+
+    private void writeHub(RegistryFriendlyByteBuf buf) {
+        buf.writeBoolean(inHub);
+        buf.writeVarInt(voucherId);
+        buf.writeVarInt(costSingle);
+        buf.writeVarInt(multiCount);
+        buf.writeVarInt(costMulti);
+        buf.writeVarLong(startTime);
+        buf.writeVarLong(endTime);
+        buf.writeVarInt(weekMask);
+        buf.writeVarInt(delivery);
+    }
+
+    private void readHub(RegistryFriendlyByteBuf buf) {
+        inHub = buf.readBoolean();
+        voucherId = buf.readVarInt();
+        costSingle = buf.readVarInt();
+        multiCount = buf.readVarInt();
+        costMulti = buf.readVarInt();
+        startTime = buf.readVarLong();
+        endTime = buf.readVarLong();
+        weekMask = buf.readVarInt();
+        delivery = buf.readVarInt();
+    }
+
+    private CompoundTag saveHub() {
+        CompoundTag h = new CompoundTag();
+        h.putBoolean("inHub", inHub);
+        h.putInt("voucher", voucherId);
+        h.putInt("costSingle", costSingle);
+        h.putInt("multiCount", multiCount);
+        h.putInt("costMulti", costMulti);
+        h.putLong("start", startTime);
+        h.putLong("end", endTime);
+        h.putInt("weekMask", weekMask);
+        h.putInt("delivery", delivery);
+        return h;
+    }
+
+    private void loadHub(CompoundTag h) {
+        inHub = h.getBoolean("inHub");
+        voucherId = h.getInt("voucher");
+        costSingle = h.getInt("costSingle");
+        multiCount = h.getInt("multiCount");
+        costMulti = h.getInt("costMulti");
+        startTime = h.getLong("start");
+        endTime = h.getLong("end");
+        weekMask = h.getInt("weekMask");
+        delivery = h.getInt("delivery");
     }
 }

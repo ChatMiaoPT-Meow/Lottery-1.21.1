@@ -133,8 +133,30 @@ public final class ScratchService {
         List<Draw> draws = Roller.rollTicket(type, random, pity);
         if (type.pityCount > 0) data.setPity(player.getUUID(), type.id, pity[0]);
 
+        ScratchRound round = buildRound(type, draws, random, table.nextRoundId++);
+        type.scratched++;
+        List<Prize> prizes = round.prizes();
+        if (!prizes.isEmpty()) {
+            type.wins++;
+            round.winId = recordWin(player, data, type, prizes, random);
+            LotteryLog.log(player.server, "WIN", LotteryLog.who(player) + " type #" + type.id + " " + type.name
+                    + " -> " + round.winId + " " + LotteryLog.prizes(prizes) + " (" + draws.size() + " draws, pity " + pity[0] + ")");
+        } else {
+            LotteryLog.log(player.server, "ROLL", LotteryLog.who(player) + " type #" + type.id + " " + type.name + " -> no prize");
+        }
+        data.setDirty();
+        table.round = round;
+        table.changed();
+        return true;
+    }
+
+    /**
+     * Wraps already-rolled draws into a round for the type's play style (board / reels), copying the style
+     * settings so later edits to the type never change it. Shared by the table and the gacha screen.
+     */
+    public static ScratchRound buildRound(TicketType type, List<Draw> draws, RandomSource random, int roundId) {
         ScratchRound round = new ScratchRound();
-        round.roundId = table.nextRoundId++;
+        round.roundId = roundId;
         round.typeId = type.id;
         round.typeName = type.name;
         round.style = type.playStyle().id;
@@ -160,29 +182,21 @@ public final class ScratchService {
             }
             case CARDS -> { }
         }
-        type.scratched++;
-        List<Prize> prizes = round.prizes();
-        if (!prizes.isEmpty()) {
-            type.wins++;
-            WinRecord rec = new WinRecord();
-            rec.winId = data.newWinId(type.id, random);
-            rec.typeId = type.id;
-            rec.typeName = type.name;
-            rec.prizes = new ArrayList<>(prizes);
-            rec.winnerId = player.getUUID();
-            rec.winnerName = player.getGameProfile().getName();
-            rec.rolledAt = System.currentTimeMillis();
-            data.addWin(rec);
-            round.winId = rec.winId;
-            LotteryLog.log(player.server, "WIN", LotteryLog.who(player) + " type #" + type.id + " " + type.name
-                    + " -> " + rec.winId + " " + LotteryLog.prizes(prizes) + " (" + draws.size() + " draws, pity " + pity[0] + ")");
-        } else {
-            LotteryLog.log(player.server, "ROLL", LotteryLog.who(player) + " type #" + type.id + " " + type.name + " -> no prize");
-        }
-        data.setDirty();
-        table.round = round;
-        table.changed();
-        return true;
+        return round;
+    }
+
+    /** Opens a ledger record for a winning ticket. @return its win id */
+    static String recordWin(ServerPlayer player, LotteryData data, TicketType type, List<Prize> prizes, RandomSource random) {
+        WinRecord rec = new WinRecord();
+        rec.winId = data.newWinId(type.id, random);
+        rec.typeId = type.id;
+        rec.typeName = type.name;
+        rec.prizes = new ArrayList<>(prizes);
+        rec.winnerId = player.getUUID();
+        rec.winnerName = player.getGameProfile().getName();
+        rec.rolledAt = System.currentTimeMillis();
+        data.addWin(rec);
+        return rec.winId;
     }
 
     /** Client revealed some cells (only used to restore progress when the GUI is reopened). */

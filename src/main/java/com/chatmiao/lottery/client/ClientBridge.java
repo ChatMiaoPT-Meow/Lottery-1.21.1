@@ -34,6 +34,41 @@ public final class ClientBridge {
         }
     }
 
+    public static void syncVouchers(Payloads.SyncVouchers p) {
+        com.chatmiao.lottery.data.VoucherNames.replaceAll(p.info());
+    }
+
+    public static void openVouchers(Payloads.OpenVouchers p) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.screen instanceof VoucherScreen screen) {
+            screen.update(p);
+        } else {
+            mc.setScreen(new VoucherScreen(p));
+        }
+    }
+
+    public static void openHub(Payloads.OpenHub p) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.screen instanceof GachaScreen screen) {
+            screen.update(p);
+        } else {
+            mc.setScreen(new GachaScreen(p));
+        }
+    }
+
+    public static void hubState(Payloads.HubState p) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.screen instanceof PlayScreen screen && screen.accepts(p)) {
+            screen.setState(p);
+        } else {
+            mc.setScreen(PlayScreen.create(p));
+        }
+    }
+
+    public static void hubHistory(Payloads.HubHistory p) {
+        if (Minecraft.getInstance().screen instanceof GachaScreen screen) screen.setHistory(p.records());
+    }
+
     public static void openRedeem(Payloads.OpenRedeem p) {
         Minecraft.getInstance().setScreen(new RedeemScreen(p));
     }

@@ -32,7 +32,22 @@ public abstract class PlayScreen extends Screen {
     private static final int INTRO_TICKS = 7;
     private static final int TILE = 26;
 
+    /**
+     * Where the round comes from: a scratch table (pos + tickets left on it) or a gacha pull
+     * (prizes direct or as a winning ticket, and what "再抽一次" costs).
+     */
+    public record Source(BlockPos pos, int stock, boolean hub, boolean direct, int voucherId, int againCost, boolean canAgain) {
+        public static Source of(Payloads.ScratchState s) {
+            return new Source(s.pos(), s.stock(), false, false, 0, 0, false);
+        }
+
+        public static Source of(Payloads.HubState s) {
+            return new Source(BlockPos.ZERO, 0, true, s.direct(), s.voucherId(), s.againCost(), s.canAgain());
+        }
+    }
+
     protected final BlockPos pos;
+    protected Source source;
     protected ScratchRound round;
     protected int stock;
     protected boolean waiting;
@@ -58,18 +73,26 @@ public abstract class PlayScreen extends Screen {
     private int sx, sy, sw, sh, sCols;
     private final List<Button> overlayButtons = new ArrayList<>();
 
-    protected PlayScreen(Payloads.ScratchState state) {
+    protected PlayScreen(Source source, ScratchRound round) {
         super(Component.translatable("gui.lottery.scratch"));
-        this.pos = state.pos();
-        applyState(state);
+        this.pos = source.pos();
+        applyState(source, round);
     }
 
     /** Picks the GUI for the round's play style. */
     public static PlayScreen create(Payloads.ScratchState state) {
-        return switch (state.round().playStyle()) {
-            case MATCH -> new ScratchScreen(state);
-            case CASE -> new CaseScreen(state);
-            case CARDS -> new CardScreen(state);
+        return create(Source.of(state), state.round());
+    }
+
+    public static PlayScreen create(Payloads.HubState state) {
+        return create(Source.of(state), state.round());
+    }
+
+    private static PlayScreen create(Source source, ScratchRound round) {
+        return switch (round.playStyle()) {
+            case MATCH -> new ScratchScreen(source, round);
+            case CASE -> new CaseScreen(source, round);
+            case CARDS -> new CardScreen(source, round);
         };
     }
 
@@ -77,19 +100,33 @@ public abstract class PlayScreen extends Screen {
         return pos;
     }
 
+    public boolean isHub() {
+        return source.hub();
+    }
+
     /** True if this screen can show {@code state} in place (same table and same play style). */
     public boolean accepts(Payloads.ScratchState state) {
-        return pos.equals(state.pos()) && state.round() != null && state.round().style == round.style;
+        return !source.hub() && pos.equals(state.pos()) && state.round() != null && state.round().style == round.style;
+    }
+
+    public boolean accepts(Payloads.HubState state) {
+        return source.hub() && state.round().style == round.style;
     }
 
     public void setState(Payloads.ScratchState state) {
-        applyState(state);
+        applyState(Source.of(state), state.round());
         rebuildWidgets();
     }
 
-    private void applyState(Payloads.ScratchState state) {
-        round = state.round();
-        stock = state.stock();
+    public void setState(Payloads.HubState state) {
+        applyState(Source.of(state), state.round());
+        rebuildWidgets();
+    }
+
+    private void applyState(Source source, ScratchRound round) {
+        this.source = source;
+        this.round = round;
+        stock = source.stock();
         waiting = false;
         particles.clear();
         revealed = round.revealedMask & round.allMask();
@@ -140,7 +177,9 @@ public abstract class PlayScreen extends Screen {
         long fresh = mask & ~revealed & round.allMask();
         if (fresh == 0) return;
         revealed |= fresh;
-        PacketDistributor.sendToServer(new Payloads.Reveal(pos, round.roundId, fresh));
+        PacketDistributor.sendToServer(source.hub()
+                ? new Payloads.HubReveal(round.roundId, fresh)
+                : new Payloads.Reveal(pos, round.roundId, fresh));
         checkFinished();
     }
 
@@ -198,17 +237,20 @@ public abstract class PlayScreen extends Screen {
 
     /** "收下彩票 / 谢谢参与" (+ "再来一张") centred on {@code cx}. */
     private List<Button> resultButtons(int cx, int y) {
-        Component doneText = round.won()
-                ? Component.translatable("gui.lottery.scratch.collect")
-                : Component.translatable("gui.lottery.scratch.thanks");
+        Component doneText = !round.won() ? Component.translatable("gui.lottery.scratch.thanks")
+                : source.hub() && source.direct() ? Component.translatable("gui.lottery.hub.collect")
+                : Component.translatable("gui.lottery.scratch.collect");
         List<Button> out = new ArrayList<>();
         Button done = Button.builder(doneText, b -> finish(false)).bounds(0, y, 100, 18).build();
         done.active = !waiting;
         out.add(done);
-        if (stock > 0) {
-            Button again = Button.builder(Component.translatable("gui.lottery.scratch.again", stock), b -> finish(true))
-                    .bounds(cx + 4, y, 100, 18).build();
-            again.active = !waiting;
+        boolean offerAgain = source.hub() ? source.voucherId() > 0 : stock > 0;
+        if (offerAgain) {
+            Component againText = source.hub()
+                    ? Component.translatable("gui.lottery.hub.again", source.againCost())
+                    : Component.translatable("gui.lottery.scratch.again", stock);
+            Button again = Button.builder(againText, b -> finish(true)).bounds(cx + 4, y, 100, 18).build();
+            again.active = !waiting && (!source.hub() || source.canAgain());
             done.setX(cx - 104);
             out.add(again);
         } else {
@@ -224,6 +266,12 @@ public abstract class PlayScreen extends Screen {
     private void finish(boolean next) {
         if (waiting) return;
         waiting = true;
+        if (source.hub()) {
+            // the server answers with the next pull or the pool list, which replaces this screen
+            PacketDistributor.sendToServer(new Payloads.HubFinish(round.roundId, next));
+            rebuildWidgets();
+            return;
+        }
         PacketDistributor.sendToServer(new Payloads.Finish(pos, round.roundId, next));
         if (!next) {
             onClose();
@@ -373,7 +421,10 @@ public abstract class PlayScreen extends Screen {
     /** The shared title bar: type colour band, title and "编号 / 剩余". */
     protected void titleBar(GuiGraphics g, Component title) {
         g.drawString(font, title, left + 8, top + 6, 0xFFFFFFFF, true);
-        g.drawString(font, Component.translatable("gui.lottery.scratch.sub", round.typeId, stock), left + 8, top + 18, 0xFFF0F0F0, false);
+        Component sub = source.hub()
+                ? Component.translatable("gui.lottery.hub.sub", round.typeId, round.draws.size())
+                : Component.translatable("gui.lottery.scratch.sub", round.typeId, stock);
+        g.drawString(font, sub, left + 8, top + 18, 0xFFF0F0F0, false);
     }
 
     /** Centered text without the drop shadow. */

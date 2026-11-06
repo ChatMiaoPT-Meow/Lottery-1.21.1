@@ -20,7 +20,8 @@ public final class Network {
     @SubscribeEvent
     public static void register(RegisterPayloadHandlersEvent event) {
         // "2": play styles / multi-draw tickets changed TicketType, ScratchRound and Reveal on the wire
-        PayloadRegistrar r = event.registrar("2");
+        // "3": gacha pools + vouchers (TicketType hub fields, OpenTerminal vouchers, hub payloads)
+        PayloadRegistrar r = event.registrar("3");
 
         // Client-bound handlers only touch ClientBridge inside the lambda body, so the client
         // classes are never loaded on a dedicated server. Handlers run on the main thread.
@@ -40,6 +41,33 @@ public final class Network {
                 (p, ctx) -> ScratchService.finish((ServerPlayer) ctx.player(), p.pos(), p.roundId(), p.next()));
         r.playToServer(Payloads.Redeem.TYPE, Payloads.Redeem.CODEC,
                 (p, ctx) -> RedeemService.redeem((ServerPlayer) ctx.player(), p.pos(), p.winIds()));
+
+        // gacha pools / vouchers
+        r.playToClient(Payloads.SyncVouchers.TYPE, Payloads.SyncVouchers.CODEC, (p, ctx) -> ClientBridge.syncVouchers(p));
+        r.playToClient(Payloads.OpenVouchers.TYPE, Payloads.OpenVouchers.CODEC, (p, ctx) -> ClientBridge.openVouchers(p));
+        r.playToClient(Payloads.OpenHub.TYPE, Payloads.OpenHub.CODEC, (p, ctx) -> ClientBridge.openHub(p));
+        r.playToClient(Payloads.HubState.TYPE, Payloads.HubState.CODEC, (p, ctx) -> ClientBridge.hubState(p));
+        r.playToClient(Payloads.HubHistory.TYPE, Payloads.HubHistory.CODEC, (p, ctx) -> ClientBridge.hubHistory(p));
+        r.playToServer(Payloads.Request.TYPE, Payloads.Request.CODEC, (p, ctx) -> {
+            ServerPlayer player = (ServerPlayer) ctx.player();
+            switch (p.what()) {
+                case Payloads.Request.HUB -> com.chatmiao.lottery.logic.HubService.open(player);
+                case Payloads.Request.HISTORY -> com.chatmiao.lottery.logic.HubService.history(player);
+                case Payloads.Request.VOUCHERS -> TerminalService.openVouchers(player, 0);
+                case Payloads.Request.TERMINAL -> TerminalService.reopen(player);
+                default -> { }
+            }
+        });
+        r.playToServer(Payloads.HubPull.TYPE, Payloads.HubPull.CODEC,
+                (p, ctx) -> com.chatmiao.lottery.logic.HubService.pull((ServerPlayer) ctx.player(), p.typeId(), p.multi()));
+        r.playToServer(Payloads.HubReveal.TYPE, Payloads.HubReveal.CODEC,
+                (p, ctx) -> com.chatmiao.lottery.logic.HubService.reveal((ServerPlayer) ctx.player(), p.roundId(), p.mask()));
+        r.playToServer(Payloads.HubFinish.TYPE, Payloads.HubFinish.CODEC,
+                (p, ctx) -> com.chatmiao.lottery.logic.HubService.finish((ServerPlayer) ctx.player(), p.roundId(), p.again()));
+        r.playToServer(Payloads.SaveVoucher.TYPE, Payloads.SaveVoucher.CODEC,
+                (p, ctx) -> TerminalService.saveVoucher((ServerPlayer) ctx.player(), p.voucher()));
+        r.playToServer(Payloads.GenerateVoucher.TYPE, Payloads.GenerateVoucher.CODEC,
+                (p, ctx) -> TerminalService.generateVouchers((ServerPlayer) ctx.player(), p.voucherId(), p.count()));
     }
 
     /**

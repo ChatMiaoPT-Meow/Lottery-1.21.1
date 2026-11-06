@@ -37,8 +37,8 @@ public class CaseScreen extends PlayScreen {
 
     private int reelH, tileSize, tileW, winX, winW;
 
-    public CaseScreen(Payloads.ScratchState state) {
-        super(state);
+    public CaseScreen(Source source, com.chatmiao.lottery.logic.ScratchRound round) {
+        super(source, round);
     }
 
     @Override

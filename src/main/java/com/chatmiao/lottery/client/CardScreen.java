@@ -34,8 +34,8 @@ public class CardScreen extends PlayScreen {
     private int dealStart;
     private int dealtSounded;
 
-    public CardScreen(Payloads.ScratchState state) {
-        super(state);
+    public CardScreen(Source source, com.chatmiao.lottery.logic.ScratchRound round) {
+        super(source, round);
     }
 
     @Override

@@ -123,19 +123,117 @@ public final class ScreenshotDemo {
             case 491 -> shot(mc, "10_cards_flipping");
             case 512 -> shot(mc, "10b_cards_done");
             case 560 -> shot(mc, "10c_cards_summary");
-            case 570 -> mc.setScreen(new RedeemScreen(new Payloads.OpenRedeem(BlockPos.ZERO, List.of(
+            // gacha: pool list, odds, history, voucher admin, terminal gacha tab, a gacha result
+            case 562 -> {
+                com.chatmiao.lottery.data.VoucherNames.replaceAll(java.util.Map.of(
+                        1, new com.chatmiao.lottery.data.VoucherNames.Info("星辉券", 0xF0A020),
+                        2, new com.chatmiao.lottery.data.VoucherNames.Info("限定券", 0x9B59D0)));
+                mc.setScreen(new com.chatmiao.lottery.client.GachaScreen(hubData()));
+            }
+            case 570 -> shot(mc, "11_gacha");
+            case 572 -> press(mc, "gui.lottery.hub.odds");
+            case 578 -> shot(mc, "11b_gacha_odds");
+            case 580 -> mc.setScreen(new com.chatmiao.lottery.client.GachaScreen(hubData()));
+            case 582 -> press(mc, "gui.lottery.hub.history");
+            case 584 -> {
+                if (mc.screen instanceof com.chatmiao.lottery.client.GachaScreen gs) gs.setHistory(sampleHistory());
+            }
+            case 590 -> shot(mc, "11c_gacha_history");
+            case 592 -> mc.setScreen(new com.chatmiao.lottery.client.VoucherScreen(new Payloads.OpenVouchers(sampleVouchers(), 1, 1000)));
+            case 598 -> shot(mc, "12_vouchers");
+            case 600 -> mc.setScreen(new TerminalScreen(new Payloads.OpenTerminal(hubTypes(), sampleVouchers(), 6, 1000)));
+            case 602 -> press(mc, "gui.lottery.terminal.tab_hub");
+            case 608 -> shot(mc, "2f_terminal_hub");
+            case 610 -> {
+                ScratchRound r = cardRound();
+                r.revealedMask = r.allMask();
+                mc.setScreen(PlayScreen.create(new Payloads.HubState(r, true, 1, 9, true)));
+            }
+            case 626 -> shot(mc, "13_gacha_result");
+            case 640 -> mc.setScreen(new RedeemScreen(new Payloads.OpenRedeem(BlockPos.ZERO, List.of(
                     new Payloads.RedeemEntry("W2-ABCDEFGH", "夏日限定"), new Payloads.RedeemEntry("W2-JKLMNPQR", "夏日限定")))));
-            case 590 -> shot(mc, "6_redeem_box");
-            case 600 -> {
+            case 660 -> shot(mc, "6_redeem_box");
+            case 670 -> {
                 if (mc.screen instanceof RedeemScreen rs) {
                     rs.onResult(new Payloads.RedeemResult(List.of(
                             new Prize(new ItemStack(Items.DIAMOND), 5), new Prize(new ItemStack(Items.GOLD_INGOT), 12)), List.of()));
                 }
             }
-            case 622 -> shot(mc, "7_redeem_opened");
-            case 640 -> mc.stop();
+            case 692 -> shot(mc, "7_redeem_opened");
+            case 710 -> mc.stop();
             default -> {}
         }
+    }
+
+    private static List<com.chatmiao.lottery.data.VoucherType> sampleVouchers() {
+        com.chatmiao.lottery.data.VoucherType a = new com.chatmiao.lottery.data.VoucherType();
+        a.id = 1;
+        a.name = "星辉券";
+        a.color = 0xF0A020;
+        a.issued = 1280;
+        a.spent = 964;
+        com.chatmiao.lottery.data.VoucherType b = new com.chatmiao.lottery.data.VoucherType();
+        b.id = 2;
+        b.name = "限定券";
+        b.color = 0x9B59D0;
+        b.issued = 64;
+        return List.of(a, b);
+    }
+
+    /** The sample types with gacha settings: #4 permanent, #5 time-limited, #6 ten-pull with pity. */
+    private static List<TicketType> hubTypes() {
+        long now = System.currentTimeMillis();
+        List<TicketType> out = new java.util.ArrayList<>();
+        for (TicketType t : sampleTypes()) {
+            if (t.id >= 4) {
+                t.inHub = true;
+                t.voucherId = t.id == 5 ? 2 : 1;
+                t.costSingle = 1;
+                t.multiCount = 10;
+                t.costMulti = 9;
+            }
+            if (t.id == 5) {
+                t.endTime = now + (2 * 24 + 5) * 3_600_000L;
+                t.multiCount = 5;
+                t.costMulti = 5;
+            }
+            if (t.id == 4) t.weekMask = 0b0010101;
+            out.add(t);
+        }
+        return out;
+    }
+
+    private static Payloads.OpenHub hubData() {
+        List<com.chatmiao.lottery.data.HubEntry> entries = new java.util.ArrayList<>();
+        for (TicketType t : hubTypes()) {
+            if (!t.inHub) continue;
+            com.chatmiao.lottery.data.HubEntry e = com.chatmiao.lottery.data.HubEntry.of(t);
+            e.pityNow = t.id == 6 ? 57 : 12;
+            entries.add(e);
+        }
+        // put the ten-pull first so it is the selected banner
+        entries.sort((x, y) -> Integer.compare(y.typeId, x.typeId));
+        return new Payloads.OpenHub(entries, java.util.Map.of(1, 37, 2, 3));
+    }
+
+    private static List<com.chatmiao.lottery.data.PullRecord> sampleHistory() {
+        List<com.chatmiao.lottery.data.PullRecord> out = new java.util.ArrayList<>();
+        long now = System.currentTimeMillis();
+        ScratchRound cards = cardRound();
+        for (int i = 0; i < 6; i++) {
+            com.chatmiao.lottery.data.PullRecord r = new com.chatmiao.lottery.data.PullRecord();
+            r.time = now - i * 3_700_000L;
+            r.typeId = i % 2 == 0 ? 6 : 5;
+            r.typeName = i % 2 == 0 ? "星辉十连" : "龙之宝箱";
+            r.draws = i % 2 == 0 ? 10 : 1;
+            if (i % 2 == 0) {
+                for (Draw d : cards.draws) if (d.won()) r.wins.add(d);
+            } else if (i != 3) {
+                r.wins.add(prize(Items.GOLD_INGOT, 6, 1));
+            }
+            out.add(r);
+        }
+        return out;
     }
 
     private static void open(Minecraft mc, ScratchRound round, int stock) {
@@ -181,6 +279,8 @@ public final class ScreenshotDemo {
         sp.getInventory().setItem(3, WinningTicketItem.create(new WinTicketData("W2-ABCDEFGH", 2, "夏日限定", "Dev",
                 new Prize(new ItemStack(Items.DIAMOND), 5).describe())));
         sp.getInventory().setItem(4, new ItemStack(ModRegistry.LOTTERY_TERMINAL.get()));
+        sp.getInventory().setItem(5, com.chatmiao.lottery.item.VoucherItem.create(1, 37));
+        sp.getInventory().setItem(6, com.chatmiao.lottery.item.VoucherItem.create(2, 3));
         sp.getInventory().selected = 1;
         com.chatmiao.lottery.data.TicketNames.put(1, "幸运7");
         com.chatmiao.lottery.data.TicketNames.put(2, "夏日限定");
