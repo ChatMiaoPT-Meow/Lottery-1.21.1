@@ -13,6 +13,7 @@ import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.UUID;
 
 /**
  * The server ledger, saved in {@code <world>/data/lottery.dat}:
@@ -27,6 +28,8 @@ public final class LotteryData extends SavedData {
     private int nextTypeId = 1;
     private final TreeMap<Integer, TicketType> types = new TreeMap<>();
     private final Map<String, WinRecord> wins = new HashMap<>();
+    /** Pity counters: player -> type id -> draws in a row without a prize of the type's pity tier. */
+    private final Map<UUID, Map<Integer, Integer>> pity = new HashMap<>();
 
     public static LotteryData get(MinecraftServer server) {
         return server.overworld().getDataStorage().computeIfAbsent(
@@ -95,6 +98,23 @@ public final class LotteryData extends SavedData {
         }
     }
 
+    // ---------------- pity ----------------
+
+    public int pity(UUID player, int typeId) {
+        Map<Integer, Integer> m = pity.get(player);
+        return m == null ? 0 : m.getOrDefault(typeId, 0);
+    }
+
+    public void setPity(UUID player, int typeId, int value) {
+        if (value <= 0) {
+            Map<Integer, Integer> m = pity.get(player);
+            if (m != null && m.remove(typeId) != null) setDirty();
+            return;
+        }
+        pity.computeIfAbsent(player, k -> new HashMap<>()).put(typeId, value);
+        setDirty();
+    }
+
     // ---------------- persistence ----------------
 
     private static LotteryData load(CompoundTag tag, HolderLookup.Provider provider) {
@@ -109,6 +129,12 @@ public final class LotteryData extends SavedData {
             WinRecord r = WinRecord.load((CompoundTag) t, provider);
             data.wins.put(r.winId, r);
         }
+        for (Tag t : tag.getList("pity", Tag.TAG_COMPOUND)) {
+            CompoundTag p = (CompoundTag) t;
+            if (!p.hasUUID("player")) continue;
+            int n = p.getInt("count");
+            if (n > 0) data.pity.computeIfAbsent(p.getUUID("player"), k -> new HashMap<>()).put(p.getInt("type"), n);
+        }
         TicketNames.replaceAll(data.typeNames());
         return data;
     }
@@ -122,6 +148,17 @@ public final class LotteryData extends SavedData {
         ListTag winList = new ListTag();
         for (WinRecord r : wins.values()) winList.add(r.save(provider));
         tag.put("wins", winList);
+        ListTag pityList = new ListTag();
+        for (Map.Entry<UUID, Map<Integer, Integer>> e : pity.entrySet()) {
+            for (Map.Entry<Integer, Integer> c : e.getValue().entrySet()) {
+                CompoundTag p = new CompoundTag();
+                p.putUUID("player", e.getKey());
+                p.putInt("type", c.getKey());
+                p.putInt("count", c.getValue());
+                pityList.add(p);
+            }
+        }
+        tag.put("pity", pityList);
         return tag;
     }
 }

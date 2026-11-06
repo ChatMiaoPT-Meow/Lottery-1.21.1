@@ -13,13 +13,16 @@ import java.util.List;
 /**
  * One kind of lottery ticket ("编号 #id"). Every ticket carrying this id is identical and stacks.
  * <p>
- * Probability model (two-level normalisation):
+ * Probability model (two-level normalisation), applied once per draw:
  * <ul>
  *   <li>Ticket level: {@link #emptyWeight} competes with each pool's {@link Pool#weight}.</li>
  *   <li>Pool level: each {@link PoolItem#weight} competes with the other items in the same pool,
  *       then the amount is uniform in [{@link PoolItem#min}, {@link PoolItem#max}].</li>
  * </ul>
  * Pools with weight 0 or without any usable item are ignored (they never steal probability).
+ * <p>
+ * A ticket performs {@link #draws} draws. How they are shown is decided by {@link #style}; optional pity
+ * rules can force a draw into a pool of a minimum {@link Pool#tier}.
  */
 public final class TicketType {
     public static final int MAX_NAME = 32;
@@ -27,12 +30,38 @@ public final class TicketType {
     public static final int MAX_ITEMS = 45;
     public static final int MAX_WEIGHT = 1_000_000;
     public static final int MAX_AMOUNT = 64 * 36;
+    public static final int MAX_COLS = 10, MAX_ROWS = 5, MAX_WIN_NUMBERS = 5, MAX_RANGE = 99;
+    public static final int MIN_SPIN = 2, MAX_SPIN = 15, MAX_PITY = 1000;
 
     public int id;
     public String name = "";
     public int emptyWeight = 65;
     public boolean enabled = true;
     public final List<Pool> pools = new ArrayList<>();
+
+    // ---- play style (all optional in old saves; defaults reproduce the original 3×3 ticket)
+    public int style = PlayStyle.MATCH.id;
+    public int draws = 1;
+    /** MATCH: my-number grid. */
+    public int cols = 3, rows = 3;
+    /** MATCH: how many winning numbers are printed. */
+    public int winCount = 3;
+    /** MATCH: numbers come from 1..range; 0 = server default (lottery-server.toml). */
+    public int numberRange = 0;
+    /** CASE: how long the reel spins. */
+    public int spinSeconds = 5;
+    /** CARDS: cards per row. */
+    public int cardCols = 5;
+    /** CARDS: rare cards (tier >= 3) glow before flipping and flip with a special animation. */
+    public boolean rareEffect = true;
+
+    // ---- pity
+    /** Every {@code pityCount}-th draw without a tier >= {@link #pityTier} prize is forced into one. 0 = off. */
+    public int pityCount = 0;
+    public int pityTier = 4;
+    /** Multi-draw tickets contain at least one prize of tier >= this. -1 = off. */
+    public int guaranteeTier = -1;
+
     // statistics, maintained by the server only
     public int issued;
     public int scratched;
@@ -41,6 +70,7 @@ public final class TicketType {
     public static final class Pool {
         public String name = "";
         public int weight;
+        public int tier;
         public final List<PoolItem> items = new ArrayList<>();
 
         public boolean usable() {
@@ -59,6 +89,7 @@ public final class TicketType {
             Pool p = new Pool();
             p.name = name;
             p.weight = weight;
+            p.tier = tier;
             for (PoolItem it : items) p.items.add(it.copy());
             return p;
         }
@@ -84,6 +115,36 @@ public final class TicketType {
         }
     }
 
+    public PlayStyle playStyle() {
+        return PlayStyle.byId(style);
+    }
+
+    public int cells() {
+        return cols * rows;
+    }
+
+    /** Most draws the current style/layout allows (MATCH can't hit more cells than it has). */
+    public int maxDraws() {
+        PlayStyle s = playStyle();
+        return s == PlayStyle.MATCH ? Math.min(s.maxDraws, cells()) : s.maxDraws;
+    }
+
+    /** Numbers needed so winning numbers and my numbers can all be distinct. */
+    public int neededRange() {
+        return winCount + cells();
+    }
+
+    public int effectiveRange(int serverDefault) {
+        int r = numberRange > 0 ? numberRange : serverDefault;
+        return Math.max(neededRange(), Math.min(MAX_RANGE, r));
+    }
+
+    /** True if some usable pool has tier >= {@code tier}, i.e. a pity rule targeting it can be honoured. */
+    public boolean hasTierAtLeast(int tier) {
+        for (Pool p : pools) if (p.usable() && p.tier >= tier) return true;
+        return false;
+    }
+
     /** Sum of the ticket-level weights that actually take part in a roll. */
     public long totalWeight() {
         long sum = Math.max(0, emptyWeight);
@@ -93,10 +154,17 @@ public final class TicketType {
         return sum;
     }
 
-    /** Chance (0..1) that one ticket wins anything. */
+    /** Chance (0..1) that one draw wins anything (ignoring pity). */
     public double winChance() {
         long total = totalWeight();
         return total <= 0 ? 0 : (double) (total - Math.max(0, emptyWeight)) / total;
+    }
+
+    /** Chance (0..1) that a whole ticket wins at least one prize (ignoring pity). */
+    public double ticketWinChance() {
+        double p = winChance();
+        if (guaranteeTier >= 0 && draws > 1 && hasTierAtLeast(guaranteeTier)) return 1;
+        return 1 - Math.pow(1 - p, Math.max(1, draws));
     }
 
     public TicketType copy() {
@@ -106,10 +174,26 @@ public final class TicketType {
         t.emptyWeight = emptyWeight;
         t.enabled = enabled;
         for (Pool p : pools) t.pools.add(p.copy());
+        t.copyStyleFrom(this);
         t.issued = issued;
         t.scratched = scratched;
         t.wins = wins;
         return t;
+    }
+
+    private void copyStyleFrom(TicketType o) {
+        style = o.style;
+        draws = o.draws;
+        cols = o.cols;
+        rows = o.rows;
+        winCount = o.winCount;
+        numberRange = o.numberRange;
+        spinSeconds = o.spinSeconds;
+        cardCols = o.cardCols;
+        rareEffect = o.rareEffect;
+        pityCount = o.pityCount;
+        pityTier = o.pityTier;
+        guaranteeTier = o.guaranteeTier;
     }
 
     /** Clamp everything a (trusted, but possibly buggy) client sent into sane bounds. */
@@ -123,6 +207,7 @@ public final class TicketType {
             p.name = p.name == null ? "" : p.name.strip();
             if (p.name.length() > MAX_NAME) p.name = p.name.substring(0, MAX_NAME);
             p.weight = clamp(p.weight, 0, MAX_WEIGHT);
+            p.tier = Tier.clamp(p.tier);
             p.items.removeIf(it -> it.item == null || it.item.isEmpty());
             while (p.items.size() > MAX_ITEMS) p.items.remove(p.items.size() - 1);
             for (PoolItem it : p.items) {
@@ -132,6 +217,7 @@ public final class TicketType {
                 it.max = clamp(it.max, it.min, MAX_AMOUNT);
             }
         }
+        sanitizeStyleOnly();
     }
 
     private static int clamp(int v, int lo, int hi) {
@@ -152,6 +238,7 @@ public final class TicketType {
         for (Pool p : pools) {
             buf.writeUtf(p.name, 256);
             buf.writeVarInt(p.weight);
+            buf.writeVarInt(p.tier);
             buf.writeVarInt(p.items.size());
             for (PoolItem it : p.items) {
                 ItemStack.OPTIONAL_STREAM_CODEC.encode(buf, it.item);
@@ -160,6 +247,18 @@ public final class TicketType {
                 buf.writeVarInt(it.max);
             }
         }
+        buf.writeVarInt(style);
+        buf.writeVarInt(draws);
+        buf.writeVarInt(cols);
+        buf.writeVarInt(rows);
+        buf.writeVarInt(winCount);
+        buf.writeVarInt(numberRange);
+        buf.writeVarInt(spinSeconds);
+        buf.writeVarInt(cardCols);
+        buf.writeBoolean(rareEffect);
+        buf.writeVarInt(pityCount);
+        buf.writeVarInt(pityTier);
+        buf.writeVarInt(guaranteeTier + 1);
     }
 
     public static TicketType read(RegistryFriendlyByteBuf buf) {
@@ -176,6 +275,7 @@ public final class TicketType {
             Pool p = new Pool();
             p.name = buf.readUtf(256);
             p.weight = buf.readVarInt();
+            p.tier = buf.readVarInt();
             int itemCount = Math.min(buf.readVarInt(), MAX_ITEMS * 4);
             for (int j = 0; j < itemCount; j++) {
                 PoolItem it = new PoolItem();
@@ -187,6 +287,18 @@ public final class TicketType {
             }
             t.pools.add(p);
         }
+        t.style = buf.readVarInt();
+        t.draws = buf.readVarInt();
+        t.cols = buf.readVarInt();
+        t.rows = buf.readVarInt();
+        t.winCount = buf.readVarInt();
+        t.numberRange = buf.readVarInt();
+        t.spinSeconds = buf.readVarInt();
+        t.cardCols = buf.readVarInt();
+        t.rareEffect = buf.readBoolean();
+        t.pityCount = buf.readVarInt();
+        t.pityTier = buf.readVarInt();
+        t.guaranteeTier = buf.readVarInt() - 1;
         return t;
     }
 
@@ -206,6 +318,7 @@ public final class TicketType {
             CompoundTag pt = new CompoundTag();
             pt.putString("name", p.name);
             pt.putInt("weight", p.weight);
+            pt.putInt("tier", p.tier);
             ListTag items = new ListTag();
             for (PoolItem it : p.items) {
                 if (it.item.isEmpty()) continue;
@@ -220,6 +333,20 @@ public final class TicketType {
             poolList.add(pt);
         }
         tag.put("pools", poolList);
+        CompoundTag st = new CompoundTag();
+        st.putInt("style", style);
+        st.putInt("draws", draws);
+        st.putInt("cols", cols);
+        st.putInt("rows", rows);
+        st.putInt("winCount", winCount);
+        st.putInt("numberRange", numberRange);
+        st.putInt("spinSeconds", spinSeconds);
+        st.putInt("cardCols", cardCols);
+        st.putBoolean("rareEffect", rareEffect);
+        st.putInt("pityCount", pityCount);
+        st.putInt("pityTier", pityTier);
+        st.putInt("guaranteeTier", guaranteeTier);
+        tag.put("play", st);
         return tag;
     }
 
@@ -237,6 +364,7 @@ public final class TicketType {
             Pool p = new Pool();
             p.name = pt.getString("name");
             p.weight = pt.getInt("weight");
+            p.tier = pt.getInt("tier"); // missing in old saves -> 0 (普通)
             for (Tag iTag : pt.getList("items", Tag.TAG_COMPOUND)) {
                 CompoundTag it = (CompoundTag) iTag;
                 PoolItem pi = new PoolItem();
@@ -249,6 +377,38 @@ public final class TicketType {
             }
             t.pools.add(p);
         }
+        // types saved before play styles existed have no "play" tag and keep the 3×3 / 1-draw defaults
+        if (tag.contains("play", Tag.TAG_COMPOUND)) {
+            CompoundTag st = tag.getCompound("play");
+            t.style = st.getInt("style");
+            t.draws = st.getInt("draws");
+            t.cols = st.getInt("cols");
+            t.rows = st.getInt("rows");
+            t.winCount = st.getInt("winCount");
+            t.numberRange = st.getInt("numberRange");
+            t.spinSeconds = st.getInt("spinSeconds");
+            t.cardCols = st.getInt("cardCols");
+            t.rareEffect = st.getBoolean("rareEffect");
+            t.pityCount = st.getInt("pityCount");
+            t.pityTier = st.getInt("pityTier");
+            t.guaranteeTier = st.getInt("guaranteeTier");
+        }
+        t.sanitizeStyleOnly();
         return t;
+    }
+
+    /** Bound the play-style fields without touching name/pools (used on load). */
+    private void sanitizeStyleOnly() {
+        style = playStyle().id;
+        cols = clamp(cols, 1, MAX_COLS);
+        rows = clamp(rows, 1, MAX_ROWS);
+        winCount = clamp(winCount, 1, MAX_WIN_NUMBERS);
+        numberRange = numberRange <= 0 ? 0 : clamp(numberRange, neededRange(), MAX_RANGE);
+        spinSeconds = clamp(spinSeconds, MIN_SPIN, MAX_SPIN);
+        cardCols = clamp(cardCols, 1, MAX_COLS);
+        draws = clamp(draws, 1, maxDraws());
+        pityCount = clamp(pityCount, 0, MAX_PITY);
+        pityTier = Tier.clamp(pityTier);
+        guaranteeTier = guaranteeTier < 0 ? -1 : Tier.clamp(guaranteeTier);
     }
 }

@@ -24,13 +24,13 @@ public final class ClientBridge {
     public static void scratchState(Payloads.ScratchState p) {
         Minecraft mc = Minecraft.getInstance();
         if (p.round() == null) {
-            if (mc.screen instanceof ScratchScreen screen && screen.pos().equals(p.pos())) screen.onClose();
+            if (mc.screen instanceof PlayScreen screen && screen.pos().equals(p.pos())) screen.onClose();
             return;
         }
-        if (mc.screen instanceof ScratchScreen screen && screen.pos().equals(p.pos())) {
+        if (mc.screen instanceof PlayScreen screen && screen.accepts(p)) {
             screen.setState(p);
         } else {
-            mc.setScreen(new ScratchScreen(p));
+            mc.setScreen(PlayScreen.create(p));
         }
     }
 

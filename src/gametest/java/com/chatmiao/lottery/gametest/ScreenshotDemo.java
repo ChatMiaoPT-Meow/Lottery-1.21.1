@@ -3,11 +3,16 @@ package com.chatmiao.lottery.gametest;
 import com.chatmiao.lottery.LotteryMod;
 import com.chatmiao.lottery.ModRegistry;
 import com.chatmiao.lottery.block.ScratchTableBlock;
+import com.chatmiao.lottery.client.PlayScreen;
 import com.chatmiao.lottery.client.RedeemScreen;
-import com.chatmiao.lottery.client.ScratchScreen;
 import com.chatmiao.lottery.client.TerminalScreen;
+import com.chatmiao.lottery.data.Draw;
+import com.chatmiao.lottery.data.PlayStyle;
 import com.chatmiao.lottery.data.Prize;
 import com.chatmiao.lottery.data.TicketType;
+import com.chatmiao.lottery.logic.Roller;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.util.RandomSource;
 import com.chatmiao.lottery.item.ScratchTicketItem;
 import com.chatmiao.lottery.item.WinTicketData;
 import com.chatmiao.lottery.item.WinningTicketItem;
@@ -76,31 +81,69 @@ public final class ScreenshotDemo {
                 mc.screen.mouseClicked(left + 268 + 40, top + 20 + 18 + 5, 0);
             }
             case 118 -> shot(mc, "2b_terminal_edit");
-            case 120 -> mc.setScreen(new ScratchScreen(new Payloads.ScratchState(BlockPos.ZERO, sampleRound(0b000_000_101_011), 23)));
-            case 140 -> shot(mc, "3_scratch_partial");
-            case 150 -> mc.setScreen(new ScratchScreen(new Payloads.ScratchState(BlockPos.ZERO, sampleRound(ScratchRound.ALL_CELLS), 23)));
-            case 170 -> shot(mc, "4_scratch_won");
-            case 180 -> {
-                ScratchRound lost = sampleRound(ScratchRound.ALL_CELLS);
-                lost.prize = null;
-                lost.hitCell = -1;
+            // style tab for each play style
+            case 120 -> mc.setScreen(new TerminalScreen(new Payloads.OpenTerminal(sampleTypes(), 4, 1000)));
+            case 122 -> press(mc, "gui.lottery.terminal.tab_style");
+            case 128 -> shot(mc, "2c_style_match");
+            case 130 -> mc.setScreen(new TerminalScreen(new Payloads.OpenTerminal(sampleTypes(), 5, 1000)));
+            case 132 -> press(mc, "gui.lottery.terminal.tab_style");
+            case 138 -> shot(mc, "2d_style_case");
+            case 140 -> mc.setScreen(new TerminalScreen(new Payloads.OpenTerminal(sampleTypes(), 6, 1000)));
+            case 142 -> press(mc, "gui.lottery.terminal.tab_style");
+            case 148 -> shot(mc, "2e_style_cards");
+            // classic 3×3
+            case 150 -> open(mc, sampleRound(0b000_000_101_011), 23);
+            case 170 -> shot(mc, "3_scratch_partial");
+            case 180 -> open(mc, sampleRound(0xFFF), 23);
+            case 200 -> shot(mc, "4_scratch_won");
+            case 210 -> {
+                ScratchRound lost = sampleRound(0xFFF);
+                lost.draws = List.of(Draw.EMPTY);
+                lost.hitCells = new int[]{-1};
                 lost.board[4] = 17;
-                mc.setScreen(new ScratchScreen(new Payloads.ScratchState(BlockPos.ZERO, lost, 0)));
+                open(mc, lost, 0);
             }
-            case 200 -> shot(mc, "5_scratch_lost");
-            case 210 -> mc.setScreen(new RedeemScreen(new Payloads.OpenRedeem(BlockPos.ZERO, List.of(
+            case 230 -> shot(mc, "5_scratch_lost");
+            // new styles
+            case 240 -> open(mc, bigMatchRound(), 5);
+            case 260 -> shot(mc, "8_match_10x4");
+            case 270 -> open(mc, caseRound(), 2);
+            case 272 -> press(mc, "gui.lottery.case.open");
+            case 300 -> shot(mc, "9_case_spinning");
+            case 380 -> shot(mc, "9b_case_done");
+            case 390 -> open(mc, cardRound(), 9);
+            case 392 -> press(mc, "gui.lottery.cards.flip_all");
+            case 410 -> shot(mc, "10_cards_flipping");
+            case 470 -> shot(mc, "10b_cards_done");
+            case 480 -> mc.setScreen(new RedeemScreen(new Payloads.OpenRedeem(BlockPos.ZERO, List.of(
                     new Payloads.RedeemEntry("W2-ABCDEFGH", "夏日限定"), new Payloads.RedeemEntry("W2-JKLMNPQR", "夏日限定")))));
-            case 230 -> shot(mc, "6_redeem_box");
-            case 240 -> {
+            case 500 -> shot(mc, "6_redeem_box");
+            case 510 -> {
                 if (mc.screen instanceof RedeemScreen rs) {
                     rs.onResult(new Payloads.RedeemResult(List.of(
                             new Prize(new ItemStack(Items.DIAMOND), 5), new Prize(new ItemStack(Items.GOLD_INGOT), 12)), List.of()));
                 }
             }
-            case 262 -> shot(mc, "7_redeem_opened");
-            case 280 -> mc.stop();
+            case 532 -> shot(mc, "7_redeem_opened");
+            case 550 -> mc.stop();
             default -> {}
         }
+    }
+
+    private static void open(Minecraft mc, ScratchRound round, int stock) {
+        mc.setScreen(PlayScreen.create(new Payloads.ScratchState(BlockPos.ZERO, round, stock)));
+    }
+
+    /** Presses the visible button whose label is the given translation. */
+    private static void press(Minecraft mc, String key) {
+        String label = Component.translatable(key).getString();
+        for (var w : mc.screen.children()) {
+            if (w instanceof Button b && b.visible && b.active && b.getMessage().getString().equals(label)) {
+                b.onPress();
+                return;
+            }
+        }
+        LotteryMod.LOGGER.warn("demo: no button {}", label);
     }
 
     private static void shot(Minecraft mc, String name) {
@@ -178,21 +221,64 @@ public final class ScreenshotDemo {
         b.issued = 1000;
         b.scratched = 873;
         b.wins = 301;
-        b.pools.add(pool("三等奖池", 25, new Object[][]{{Items.IRON_INGOT, 60, 8, 16}, {Items.GOLD_INGOT, 25, 2, 6}, {Items.BREAD, 15, 16, 32}}));
-        b.pools.add(pool("二等奖池", 8, new Object[][]{{Items.EMERALD, 1, 4, 8}}));
-        b.pools.add(pool("一等奖池", 2, new Object[][]{{Items.DIAMOND, 1, 5, 5}}));
-        b.pools.add(pool("空池", 3, new Object[0][]));
+        b.pools.add(pool("三等奖池", 25, 1, new Object[][]{{Items.IRON_INGOT, 60, 8, 16}, {Items.GOLD_INGOT, 25, 2, 6}, {Items.BREAD, 15, 16, 32}}));
+        b.pools.add(pool("二等奖池", 8, 2, new Object[][]{{Items.EMERALD, 1, 4, 8}}));
+        b.pools.add(pool("一等奖池", 2, 4, new Object[][]{{Items.DIAMOND, 1, 5, 5}}));
+        b.pools.add(pool("空池", 3, 0, new Object[0][]));
         TicketType c = new TicketType();
         c.id = 3;
         c.name = "钻石狂欢";
         c.enabled = false;
-        return List.of(a, b, c);
+
+        TicketType big = new TicketType();
+        big.id = 4;
+        big.name = "超级大乐透";
+        big.emptyWeight = 80;
+        big.cols = 10;
+        big.rows = 4;
+        big.winCount = 5;
+        big.draws = 3;
+        big.pityCount = 50;
+        big.pityTier = 4;
+        tieredPools(big);
+
+        TicketType box = new TicketType();
+        box.id = 5;
+        box.name = "龙之宝箱";
+        box.style = PlayStyle.CASE.id;
+        box.emptyWeight = 30;
+        box.draws = 3;
+        box.spinSeconds = 3;
+        tieredPools(box);
+
+        TicketType ten = new TicketType();
+        ten.id = 6;
+        ten.name = "星辉十连";
+        ten.style = PlayStyle.CARDS.id;
+        ten.emptyWeight = 40;
+        ten.draws = 10;
+        ten.cardCols = 5;
+        ten.guaranteeTier = 3;
+        ten.pityCount = 80;
+        ten.pityTier = 5;
+        tieredPools(ten);
+        return List.of(a, b, c, big, box, ten);
     }
 
-    private static TicketType.Pool pool(String name, int weight, Object[][] items) {
+    private static void tieredPools(TicketType t) {
+        t.pools.add(pool("普通", 50, 0, new Object[][]{{Items.IRON_INGOT, 60, 8, 16}, {Items.BREAD, 40, 16, 32}}));
+        t.pools.add(pool("优良", 25, 1, new Object[][]{{Items.GOLD_INGOT, 1, 4, 8}}));
+        t.pools.add(pool("稀有", 12, 2, new Object[][]{{Items.EMERALD, 1, 4, 8}}));
+        t.pools.add(pool("史诗", 5, 3, new Object[][]{{Items.DIAMOND, 1, 2, 3}}));
+        t.pools.add(pool("传说", 2, 4, new Object[][]{{Items.NETHERITE_INGOT, 1, 1, 1}}));
+        t.pools.add(pool("神话", 1, 5, new Object[][]{{Items.NETHER_STAR, 1, 1, 1}}));
+    }
+
+    private static TicketType.Pool pool(String name, int weight, int tier, Object[][] items) {
         TicketType.Pool p = new TicketType.Pool();
         p.name = name;
         p.weight = weight;
+        p.tier = tier;
         for (Object[] row : items) {
             TicketType.PoolItem it = new TicketType.PoolItem();
             it.item = new ItemStack((net.minecraft.world.item.Item) row[0]);
@@ -204,17 +290,73 @@ public final class ScreenshotDemo {
         return p;
     }
 
-    private static ScratchRound sampleRound(int mask) {
+    private static ScratchRound sampleRound(long mask) {
         ScratchRound r = new ScratchRound();
         r.roundId = 1;
         r.typeId = 2;
         r.typeName = "夏日限定";
         r.winning = new int[]{7, 21, 13};
         r.board = new int[]{3, 18, 25, 9, 21, 30, 1, 12, 27};
-        r.hitCell = 4;
-        r.prize = new Prize(new ItemStack(Items.DIAMOND), 5);
+        r.draws = List.of(new Draw(new Prize(new ItemStack(Items.DIAMOND), 5), 4));
+        r.hitCells = new int[]{4};
         r.winId = "W2-ABCDEFGH";
         r.revealedMask = mask;
+        return r;
+    }
+
+    private static Draw prize(net.minecraft.world.item.Item item, int count, int tier) {
+        return new Draw(new Prize(new ItemStack(item), count), tier);
+    }
+
+    private static TicketType type(int id) {
+        for (TicketType t : sampleTypes()) if (t.id == id) return t;
+        throw new IllegalStateException();
+    }
+
+    private static ScratchRound bigMatchRound() {
+        ScratchRound r = new ScratchRound();
+        r.roundId = 2;
+        r.typeId = 4;
+        r.typeName = "超级大乐透";
+        r.cols = 10;
+        r.rows = 4;
+        r.draws = List.of(prize(Items.NETHERITE_INGOT, 1, 4), Draw.EMPTY, prize(Items.IRON_INGOT, 12, 0));
+        Roller.Board b = Roller.buildBoard(RandomSource.create(5), 60, 5, 40, r.draws);
+        r.winning = b.winning();
+        r.board = b.board();
+        r.hitCells = b.hitCells();
+        r.winId = "W4-ABCDEFGH";
+        r.revealedMask = r.allMask();
+        return r;
+    }
+
+    private static ScratchRound caseRound() {
+        ScratchRound r = new ScratchRound();
+        r.roundId = 3;
+        r.typeId = 5;
+        r.typeName = "龙之宝箱";
+        r.style = PlayStyle.CASE.id;
+        r.spinSeconds = 3;
+        r.draws = List.of(prize(Items.GOLD_INGOT, 6, 1), prize(Items.NETHERITE_INGOT, 1, 4), Draw.EMPTY);
+        Roller.Reels reels = Roller.buildReels(type(5), RandomSource.create(9), 3);
+        r.palette = reels.palette();
+        r.paletteTier = reels.paletteTier();
+        r.reels = reels.reels();
+        r.winId = "W5-ABCDEFGH";
+        return r;
+    }
+
+    private static ScratchRound cardRound() {
+        ScratchRound r = new ScratchRound();
+        r.roundId = 4;
+        r.typeId = 6;
+        r.typeName = "星辉十连";
+        r.style = PlayStyle.CARDS.id;
+        r.cardCols = 5;
+        r.draws = List.of(prize(Items.IRON_INGOT, 12, 0), Draw.EMPTY, prize(Items.GOLD_INGOT, 5, 1), prize(Items.BREAD, 24, 0),
+                prize(Items.DIAMOND, 2, 3), Draw.EMPTY, prize(Items.EMERALD, 6, 2), prize(Items.IRON_INGOT, 9, 0),
+                prize(Items.NETHER_STAR, 1, 5), Draw.EMPTY);
+        r.winId = "W6-ABCDEFGH";
         return r;
     }
 

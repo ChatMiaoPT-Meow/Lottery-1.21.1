@@ -143,12 +143,12 @@ public final class Payloads {
         }
     }
 
-    public record Reveal(BlockPos pos, int roundId, int mask) implements CustomPacketPayload {
+    public record Reveal(BlockPos pos, int roundId, long mask) implements CustomPacketPayload {
         public static final Type<Reveal> TYPE = payloadType("reveal");
         public static final StreamCodec<ByteBuf, Reveal> CODEC = StreamCodec.composite(
                 BlockPos.STREAM_CODEC, Reveal::pos,
                 ByteBufCodecs.VAR_INT, Reveal::roundId,
-                ByteBufCodecs.VAR_INT, Reveal::mask,
+                ByteBufCodecs.VAR_LONG, Reveal::mask,
                 Reveal::new);
 
         @Override

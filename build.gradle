@@ -31,8 +31,18 @@ neoForge {
             server()
             programArgument '--nogui'
         }
+        // Visual check: opens run/saves/lottery-demo, walks through every GUI (ScreenshotDemo) and saves
+        // screenshots to run/screenshots, then quits. Copy any world to saves/lottery-demo first.
+        demoClient {
+            client()
+            sourceSet = sourceSets.gametest
+            systemProperty 'lottery.demo', 'true'
+            programArguments.addAll '--quickPlaySingleplayer', 'lottery-demo'
+        }
         gameTestServer {
             type = 'gameTestServer'
+            // own directory so test ticket types never end up in the dev world's ledger (run/world)
+            gameDirectory = project.file('run-gametest')
             sourceSet = sourceSets.gametest
             systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
         }

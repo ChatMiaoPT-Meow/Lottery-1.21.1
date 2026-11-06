@@ -7,3 +7,4 @@ runs/
 .idea/
 .vscode/
 bin/
+run-gametest/

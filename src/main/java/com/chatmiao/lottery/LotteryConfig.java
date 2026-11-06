@@ -16,7 +16,8 @@ public final class LotteryConfig {
                 .defineInRange("opPermissionLevel", 2, 0, 4);
         MAX_GENERATE = b.comment("Max tickets the terminal can generate in one click.")
                 .defineInRange("maxGeneratePerClick", 1000, 1, 100000);
-        NUMBER_RANGE = b.comment("Numbers on a ticket are drawn from 1..numberRange (must be >= 12).")
+        NUMBER_RANGE = b.comment("Default number range (1..numberRange) for number-match tickets that don't set their own.",
+                        "It is raised automatically when a ticket needs more numbers (winning numbers + grid cells).")
                 .defineInRange("numberRange", 30, 12, 99);
         USE_DISTANCE = b.comment("Max distance (blocks) between a player and a table/station for its GUI actions to be accepted.")
                 .defineInRange("useDistance", 8, 2, 64);

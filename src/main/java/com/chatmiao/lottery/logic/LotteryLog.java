@@ -52,5 +52,15 @@ public final class LotteryLog {
         return player.getGameProfile().getName() + "(" + player.getUUID() + ")";
     }
 
+    /** "minecraft:diamond x5, minecraft:iron_ingot x12" */
+    public static String prizes(java.util.List<com.chatmiao.lottery.data.Prize> prizes) {
+        StringBuilder sb = new StringBuilder();
+        for (com.chatmiao.lottery.data.Prize p : prizes) {
+            if (!sb.isEmpty()) sb.append(", ");
+            sb.append(p.item().getItem()).append(" x").append(p.count());
+        }
+        return sb.toString();
+    }
+
     private LotteryLog() {}
 }

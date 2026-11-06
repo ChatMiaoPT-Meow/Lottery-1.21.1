@@ -19,7 +19,8 @@ public final class Network {
 
     @SubscribeEvent
     public static void register(RegisterPayloadHandlersEvent event) {
-        PayloadRegistrar r = event.registrar("1");
+        // "2": play styles / multi-draw tickets changed TicketType, ScratchRound and Reveal on the wire
+        PayloadRegistrar r = event.registrar("2");
 
         // Client-bound handlers only touch ClientBridge inside the lambda body, so the client
         // classes are never loaded on a dedicated server. Handlers run on the main thread.

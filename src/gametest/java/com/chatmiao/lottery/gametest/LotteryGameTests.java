@@ -3,7 +3,9 @@ package com.chatmiao.lottery.gametest;
 import com.chatmiao.lottery.LotteryMod;
 import com.chatmiao.lottery.ModRegistry;
 import com.chatmiao.lottery.block.ScratchTableBlockEntity;
+import com.chatmiao.lottery.data.Draw;
 import com.chatmiao.lottery.data.LotteryData;
+import com.chatmiao.lottery.data.PlayStyle;
 import com.chatmiao.lottery.data.Prize;
 import com.chatmiao.lottery.data.TicketType;
 import com.chatmiao.lottery.data.WinRecord;
@@ -15,6 +17,7 @@ import com.chatmiao.lottery.logic.Roller;
 import com.chatmiao.lottery.logic.ScratchRound;
 import com.chatmiao.lottery.logic.ScratchService;
 import net.minecraft.core.BlockPos;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.server.level.ServerPlayer;
@@ -108,30 +111,286 @@ public class LotteryGameTests {
         h.assertTrue(Math.abs(actual - expected) < 0.006, what + " rate " + actual + " too far from " + expected);
     }
 
-    /** Losing boards never contain a winning number; winning boards contain exactly one. */
+    /**
+     * Board rules for any layout (3×3 up to 10×5, 1..5 winning numbers, several draws): a cell matches a winning
+     * number exactly when a winning draw put its prize there, every winning draw gets its own cell, and the
+     * non-matching numbers are all distinct.
+     */
     @GameTest(template = "empty")
     public static void boardRules(GameTestHelper h) {
         RandomSource rnd = RandomSource.create(7);
-        for (int i = 0; i < 5000; i++) {
-            boolean won = rnd.nextBoolean();
-            Roller.Board b = Roller.buildBoard(rnd, 30, won);
+        int[][] layouts = {{3, 3, 3}, {10, 4, 5}, {10, 5, 5}, {1, 1, 1}, {5, 2, 2}};
+        for (int i = 0; i < 6000; i++) {
+            int[] l = layouts[i % layouts.length];
+            int cells = l[0] * l[1], winCount = l[2], range = winCount + cells + rnd.nextInt(10);
+            int n = 1 + rnd.nextInt(Math.min(10, cells));
+            List<Draw> draws = new java.util.ArrayList<>();
+            int expectedHits = 0;
+            for (int d = 0; d < n; d++) {
+                boolean won = rnd.nextBoolean();
+                draws.add(won ? new Draw(new Prize(new ItemStack(Items.STONE), 1), 0) : Draw.EMPTY);
+                if (won) expectedHits++;
+            }
+            Roller.Board b = Roller.buildBoard(rnd, range, winCount, cells, draws);
             Set<Integer> winning = new HashSet<>();
             for (int w : b.winning()) winning.add(w);
-            h.assertTrue(winning.size() == 3, "winning numbers must be distinct");
+            h.assertTrue(winning.size() == winCount, "winning numbers must be distinct");
+            h.assertTrue(b.board().length == cells && b.hitCells().length == n, "wrong board/hit sizes");
+            Set<Integer> hitCells = new HashSet<>();
+            for (int d = 0; d < n; d++) {
+                int c = b.hitCells()[d];
+                h.assertTrue((c >= 0) == draws.get(d).won(), "hit cell must exist exactly for winning draws");
+                if (c >= 0) h.assertTrue(hitCells.add(c), "two draws share a cell");
+            }
             int matches = 0;
             Set<Integer> seen = new HashSet<>();
-            for (int k = 0; k < b.board().length; k++) {
+            for (int k = 0; k < cells; k++) {
                 int v = b.board()[k];
-                h.assertTrue(v >= 1 && v <= 30, "number out of range");
-                h.assertTrue(seen.add(v), "board numbers must be distinct");
+                h.assertTrue(v >= 1 && v <= range, "number out of range");
                 if (winning.contains(v)) {
                     matches++;
-                    h.assertTrue(k == b.hitCell(), "match must be on the hit cell");
+                    h.assertTrue(hitCells.contains(k), "a match must be on a hit cell");
+                } else {
+                    h.assertTrue(seen.add(v), "non-matching numbers must be distinct");
                 }
             }
-            h.assertTrue(matches == (won ? 1 : 0), "wrong number of matches: " + matches + " won=" + won);
+            h.assertTrue(matches == expectedHits, "wrong number of matches: " + matches + " expected " + expectedHits);
         }
         h.succeed();
+    }
+
+    /** Multi-draw odds: each of the N draws follows the pool weights independently. */
+    @GameTest(template = "empty")
+    public static void multiDrawOdds(GameTestHelper h) {
+        TicketType t = new TicketType();
+        t.emptyWeight = 60;
+        t.style = PlayStyle.CARDS.id;
+        t.draws = 10;
+        t.pools.add(tiered(pool("C", 30, new ItemStack(Items.IRON_INGOT), 1, 1, 1), 0));
+        t.pools.add(tiered(pool("A", 10, new ItemStack(Items.DIAMOND), 1, 1, 1), 4));
+        RandomSource rnd = RandomSource.create(3);
+        int tickets = 20_000, draws = 0, iron = 0, diamond = 0, anyWin = 0;
+        int[] pity = {0};
+        for (int i = 0; i < tickets; i++) {
+            List<Draw> ds = Roller.rollTicket(t, rnd, pity);
+            h.assertTrue(ds.size() == 10, "a ten-pull must have 10 draws");
+            boolean won = false;
+            for (Draw d : ds) {
+                draws++;
+                if (!d.won()) {
+                    h.assertTrue(d.tier() == -1, "an empty draw has no tier");
+                    continue;
+                }
+                won = true;
+                if (d.prize().item().is(Items.IRON_INGOT)) {
+                    iron++;
+                    h.assertTrue(d.tier() == 0, "iron comes from the tier-0 pool");
+                } else {
+                    diamond++;
+                    h.assertTrue(d.tier() == 4, "diamond comes from the tier-4 pool");
+                }
+            }
+            if (won) anyWin++;
+        }
+        assertNear(h, "iron", iron / (double) draws, 0.30);
+        assertNear(h, "diamond", diamond / (double) draws, 0.10);
+        assertNear(h, "ticket", anyWin / (double) tickets, 1 - Math.pow(0.6, 10));
+        h.assertTrue(Math.abs(t.ticketWinChance() - (1 - Math.pow(0.6, 10))) < 1e-9, "ticketWinChance formula");
+
+        // draws are clamped to what the style allows
+        t.draws = 99;
+        h.assertTrue(Roller.rollTicket(t, rnd, pity).size() == PlayStyle.CARDS.maxDraws, "draws must be clamped");
+        t.style = PlayStyle.MATCH.id;
+        t.cols = 2;
+        t.rows = 2;
+        h.assertTrue(Roller.rollTicket(t, rnd, pity).size() == 4, "MATCH can't draw more than it has cells");
+        h.succeed();
+    }
+
+    /** Pity: never more than pityCount-1 misses in a row; per-ticket guarantee: every multi-draw ticket has one. */
+    @GameTest(template = "empty")
+    public static void pityAndGuarantee(GameTestHelper h) {
+        TicketType t = new TicketType();
+        t.emptyWeight = 1000;
+        t.draws = 1;
+        t.pools.add(tiered(pool("C", 100, new ItemStack(Items.IRON_INGOT), 1, 1, 1), 0));
+        t.pools.add(tiered(pool("S", 1, new ItemStack(Items.NETHER_STAR), 1, 1, 1), 5));
+        t.pityCount = 20;
+        t.pityTier = 5;
+        RandomSource rnd = RandomSource.create(11);
+        int[] pity = {0};
+        int sinceStar = 0, stars = 0;
+        for (int i = 0; i < 20_000; i++) {
+            Draw d = Roller.rollTicket(t, rnd, pity).get(0);
+            if (d.won() && d.tier() == 5) {
+                stars++;
+                sinceStar = 0;
+                h.assertTrue(pity[0] == 0, "pity counter must reset on a hit");
+            } else {
+                sinceStar++;
+                h.assertTrue(sinceStar < 20, "pity broken: " + sinceStar + " misses in a row");
+                h.assertTrue(pity[0] == sinceStar, "pity counter out of sync");
+            }
+        }
+        h.assertTrue(stars >= 20_000 / 20, "pity should give at least one star per 20 draws, got " + stars);
+
+        // pity pointing at a tier no pool reaches must be ignored (normal draw, counter untouched)
+        t.pools.remove(1);
+        t.pityTier = 4;
+        pity[0] = 500;
+        Draw d = Roller.rollTicket(t, rnd, pity).get(0);
+        h.assertTrue(d.tier() <= 0 && pity[0] == 500, "no tier-4+ pool exists, pity must stay inactive");
+
+        // per-ticket guarantee
+        TicketType g = new TicketType();
+        g.style = PlayStyle.CARDS.id;
+        g.emptyWeight = 1000;
+        g.draws = 10;
+        g.guaranteeTier = 3;
+        g.pools.add(tiered(pool("C", 100, new ItemStack(Items.IRON_INGOT), 1, 1, 1), 0));
+        g.pools.add(tiered(pool("E", 1, new ItemStack(Items.DIAMOND), 1, 1, 1), 3));
+        for (int i = 0; i < 2000; i++) {
+            List<Draw> ds = Roller.rollTicket(g, rnd, new int[]{0});
+            h.assertTrue(ds.stream().anyMatch(x -> x.won() && x.tier() >= 3), "ten-pull without its guaranteed prize");
+        }
+        h.assertTrue(g.ticketWinChance() == 1, "guaranteed ticket always wins");
+        h.succeed();
+    }
+
+    /** Case reels: fixed length, the stop tile is the real result, decoys reference the palette. */
+    @GameTest(template = "empty")
+    public static void caseReels(GameTestHelper h) {
+        TicketType t = new TicketType();
+        t.style = PlayStyle.CASE.id;
+        t.emptyWeight = 10;
+        t.pools.add(tiered(pool("C", 10, new ItemStack(Items.IRON_INGOT), 1, 1, 1), 0));
+        t.pools.add(tiered(pool("A", 1, new ItemStack(Items.DIAMOND), 1, 1, 1), 4));
+        Roller.Reels r = Roller.buildReels(t, RandomSource.create(1), 3);
+        h.assertTrue(r.reels().length == 3, "one reel per draw");
+        for (int[] reel : r.reels()) {
+            h.assertTrue(reel.length == Roller.REEL_LEN, "reel length");
+            for (int k = 0; k < reel.length; k++) {
+                if (k == Roller.REEL_STOP) h.assertTrue(reel[k] == Roller.TILE_RESULT, "stop tile must be the result");
+                else h.assertTrue(reel[k] == Roller.TILE_EMPTY || (reel[k] >= 0 && reel[k] < r.palette().size()), "bad tile " + reel[k]);
+            }
+        }
+        h.assertTrue(r.palette().size() <= 2 && r.paletteTier().length == r.palette().size(), "palette dedups items");
+        // a type with no pools still gets valid (all empty) reels
+        TicketType none = new TicketType();
+        none.style = PlayStyle.CASE.id;
+        Roller.Reels e = Roller.buildReels(none, RandomSource.create(1), 1);
+        h.assertTrue(e.palette().isEmpty(), "no pools, no palette");
+        h.succeed();
+    }
+
+    /** A ten-pull on the table: one winning ticket holds every prize; redeeming it pays all of them once. */
+    @GameTest(template = "empty")
+    public static void tenPullRedeem(GameTestHelper h) {
+        TicketType t = new TicketType();
+        t.name = "十连测试";
+        t.style = PlayStyle.CARDS.id;
+        t.emptyWeight = 0;
+        t.draws = 10;
+        t.pools.add(tiered(pool("C", 1, new ItemStack(Items.IRON_INGOT), 1, 3, 3), 0));
+        TicketType type = LotteryData.get(h.getLevel().getServer()).saveType(t);
+        ServerPlayer player = player(h);
+        BlockPos table = h.absolutePos(new BlockPos(0, 1, 0));
+        BlockPos station = h.absolutePos(new BlockPos(2, 1, 0));
+        h.setBlock(new BlockPos(0, 1, 0), ModRegistry.SCRATCH_TABLE.get());
+        h.setBlock(new BlockPos(2, 1, 0), ModRegistry.REDEEM_STATION.get());
+        ScratchTableBlockEntity be = (ScratchTableBlockEntity) h.getLevel().getBlockEntity(table);
+        player.setItemInHand(InteractionHand.MAIN_HAND, ScratchTicketItem.create(type.id, 1));
+        player.setShiftKeyDown(true);
+        ScratchService.onUse(player, table, be);
+        player.setShiftKeyDown(false);
+        ScratchService.onUse(player, table, be);
+        ScratchRound round = be.round;
+        h.assertTrue(round != null && round.playStyle() == PlayStyle.CARDS && round.draws.size() == 10, "ten cards expected");
+        h.assertTrue(round.prizes().size() == 10 && round.cellCount() == 10, "all ten draws win");
+
+        // reveal bits beyond the round's cells are dropped
+        ScratchService.reveal(player, table, round.roundId, -1L);
+        h.assertTrue(round.revealedMask == round.allMask(), "reveal mask must be clipped to the cards");
+
+        // the round survives a save/load round trip unchanged
+        var provider = h.getLevel().registryAccess();
+        ScratchRound copy = ScratchRound.load(round.save(provider), provider);
+        h.assertTrue(copy.draws.size() == 10 && copy.style == round.style && copy.revealedMask == round.revealedMask
+                && copy.winId.equals(round.winId), "round NBT round trip");
+
+        ScratchService.finish(player, table, round.roundId, false);
+        List<ItemStack> wins = winningTickets(player);
+        h.assertTrue(wins.size() == 1, "exactly one winning ticket for a ten-pull, got " + wins.size());
+        String winId = WinningTicketItem.dataOf(wins.get(0)).winId();
+        RedeemService.redeem(player, station, List.of(winId));
+        h.assertTrue(countItem(player, Items.IRON_INGOT) == 30, "10 prizes × 3 iron expected, got " + countItem(player, Items.IRON_INGOT));
+        player.getInventory().add(WinningTicketItem.create(WinningTicketItem.dataOf(wins.get(0))));
+        RedeemService.redeem(player, station, List.of(winId));
+        h.assertTrue(countItem(player, Items.IRON_INGOT) == 30, "must not pay twice");
+        h.succeed();
+    }
+
+    /** Ledger entries and rounds saved by the first version (single prize, 3×3, int reveal mask) still load. */
+    @GameTest(template = "empty")
+    public static void legacyDataLoads(GameTestHelper h) {
+        var provider = h.getLevel().registryAccess();
+        Prize diamond = new Prize(new ItemStack(Items.DIAMOND), 5);
+
+        CompoundTag oldType = new CompoundTag();
+        oldType.putInt("id", 7);
+        oldType.putString("name", "老彩票");
+        oldType.putInt("emptyWeight", 65);
+        net.minecraft.nbt.ListTag pools = new net.minecraft.nbt.ListTag();
+        CompoundTag pt = new CompoundTag();
+        pt.putString("name", "p");
+        pt.putInt("weight", 35);
+        net.minecraft.nbt.ListTag items = new net.minecraft.nbt.ListTag();
+        CompoundTag it = new CompoundTag();
+        it.put("item", new ItemStack(Items.DIAMOND).save(provider));
+        it.putInt("weight", 1);
+        it.putInt("min", 1);
+        it.putInt("max", 2);
+        items.add(it);
+        pt.put("items", items);
+        pools.add(pt);
+        oldType.put("pools", pools);
+        TicketType t = TicketType.load(oldType, provider);
+        h.assertTrue(t.playStyle() == PlayStyle.MATCH && t.draws == 1 && t.cols == 3 && t.rows == 3 && t.winCount == 3
+                && t.pityCount == 0 && t.guaranteeTier == -1 && t.pools.get(0).tier == 0, "old type must load as classic 3×3");
+        TicketType again = TicketType.load(t.save(provider), provider);
+        h.assertTrue(again.pools.size() == 1 && again.draws == 1 && again.playStyle() == PlayStyle.MATCH, "type NBT round trip");
+
+        CompoundTag oldWin = new CompoundTag();
+        oldWin.putString("winId", "W7-OLDOLDOL");
+        oldWin.putInt("typeId", 7);
+        oldWin.putString("typeName", "老彩票");
+        oldWin.put("prize", diamond.save(provider));
+        oldWin.putUUID("winner", java.util.UUID.randomUUID());
+        oldWin.putString("winnerName", "old");
+        WinRecord w = WinRecord.load(oldWin, provider);
+        h.assertTrue(w.prizes.size() == 1 && w.prizes.get(0).count() == 5, "old single-prize record must load");
+        WinRecord w2 = WinRecord.load(w.save(provider), provider);
+        h.assertTrue(w2.prizes.size() == 1, "record NBT round trip");
+
+        CompoundTag oldRound = new CompoundTag();
+        oldRound.putInt("roundId", 3);
+        oldRound.putInt("typeId", 7);
+        oldRound.putString("typeName", "老彩票");
+        oldRound.putIntArray("winning", new int[]{7, 21, 13});
+        oldRound.putIntArray("board", new int[]{3, 18, 25, 9, 21, 30, 1, 12, 27});
+        oldRound.putInt("hitCell", 4);
+        oldRound.put("prize", diamond.save(provider));
+        oldRound.putString("winId", "W7-OLDOLDOL");
+        oldRound.putInt("revealed", 0b111);
+        ScratchRound r = ScratchRound.load(oldRound, provider);
+        h.assertTrue(r.playStyle() == PlayStyle.MATCH && r.draws.size() == 1 && r.won() && r.hitCells[0] == 4
+                && r.drawAtCell(4) == 0 && r.revealedMask == 0b111 && r.cellCount() == 12, "old round must load");
+        h.succeed();
+    }
+
+    private static TicketType.Pool tiered(TicketType.Pool p, int tier) {
+        p.tier = tier;
+        return p;
     }
 
     /** Full flow: load stack → open (rolls) → reopen (same result) → collect → redeem → no double redeem. */
@@ -160,7 +419,7 @@ public class LotteryGameTests {
         ScratchService.onUse(player, table, be);
         h.assertTrue(be.round != null && be.stock == 2, "a round should be active with 2 left");
         ScratchRound first = be.round;
-        h.assertTrue(first.won() && first.hitCell >= 0, "a 100% ticket must win");
+        h.assertTrue(first.won() && first.hitCells.length == 1 && first.hitCells[0] >= 0, "a 100% ticket must win");
 
         // close + reopen: same ticket, same result (no reroll)
         ScratchService.onUse(player, table, be);

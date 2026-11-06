@@ -1,181 +1,124 @@
 package com.chatmiao.lottery.client;
 
-import com.chatmiao.lottery.logic.Roller;
-import com.chatmiao.lottery.logic.ScratchRound;
+import com.chatmiao.lottery.data.Draw;
+import com.chatmiao.lottery.data.Tier;
 import com.chatmiao.lottery.network.Payloads;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.resources.sounds.SimpleSoundInstance;
-import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
-import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.util.Mth;
-import net.neoforged.neoforge.network.PacketDistributor;
-
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Random;
 
 /**
- * 刮奖界面. The result is already locked on the server when this opens; the client only draws it.
- * Click a cell to flip it, or hold the left button and drag to scratch the coating off.
+ * 对号刮奖. Winning numbers on top, a cols×rows grid of my numbers below, all under a scratch coating.
+ * Click a cell to flip it, or hold the left button and drag to scratch. The grid adapts to the screen size.
  */
-public class ScratchScreen extends Screen {
-    private static final int W = 232, H = 234;
+public class ScratchScreen extends PlayScreen {
     private static final int PIX = 2;            // coating resolution in GUI pixels
     private static final int BRUSH = 5;          // scratch radius
     private static final float AUTO_REVEAL = 0.55F;
+    private static final int WIN_W = 40, WIN_H = 24, WIN_GAP = 8, WIN_Y = 42, GRID_Y = 84, SIDE = 14;
 
-    // cell layout, relative to the panel
-    private static final int WIN_W = 40, WIN_H = 24, WIN_GAP = 8, WIN_Y = 42;
-    private static final int CELL_W = 64, CELL_H = 30, CELL_GAP = 6, GRID_X = 14, GRID_Y = 84;
+    private int winCount, cols, rows, cells;
+    private int cellW = 64, cellH = 30, cellGap = 6, gridX = SIDE;
+    private boolean[][] cleared;
+    private int[] clearedCount;
+    private int coatW = -1, coatH = -1;
 
-    private final BlockPos pos;
-    private ScratchRound round;
-    private int stock;
-    private boolean waiting;
-    private boolean finished;
-    private final boolean[] revealed = new boolean[ScratchRound.CELL_COUNT];
-    private final boolean[][] cleared = new boolean[ScratchRound.CELL_COUNT][];
-    private final int[] clearedCount = new int[ScratchRound.CELL_COUNT];
-
-    private int left, top;
     private boolean dragging;
     private double pressX, pressY, lastX, lastY, dragDist;
     private long lastScratchSound;
-    private final List<Particle> particles = new ArrayList<>();
-    private final Random rnd = new Random();
-    private int ticks;
 
     public ScratchScreen(Payloads.ScratchState state) {
-        super(Component.translatable("gui.lottery.scratch"));
-        this.pos = state.pos();
-        applyState(state);
-    }
-
-    public BlockPos pos() {
-        return pos;
-    }
-
-    public void setState(Payloads.ScratchState state) {
-        applyState(state);
-        rebuildWidgets();
-    }
-
-    private void applyState(Payloads.ScratchState state) {
-        round = state.round();
-        stock = state.stock();
-        waiting = false;
-        particles.clear();
-        for (int i = 0; i < ScratchRound.CELL_COUNT; i++) {
-            revealed[i] = (round.revealedMask & (1 << i)) != 0;
-            int[] r = cellRect(i);
-            cleared[i] = new boolean[(r[2] / PIX) * (r[3] / PIX)];
-            clearedCount[i] = 0;
-        }
-        finished = allRevealed();
-    }
-
-    // ------------------------------------------------------------------ layout
-
-    /** {x, y, w, h} relative to the panel. Cells 0..2 = winning numbers, 3..11 = my numbers. */
-    private static int[] cellRect(int i) {
-        if (i < Roller.WINNING_COUNT) {
-            int total = Roller.WINNING_COUNT * WIN_W + (Roller.WINNING_COUNT - 1) * WIN_GAP;
-            return new int[]{(W - total) / 2 + i * (WIN_W + WIN_GAP), WIN_Y, WIN_W, WIN_H};
-        }
-        int b = i - Roller.WINNING_COUNT;
-        return new int[]{GRID_X + (b % 3) * (CELL_W + CELL_GAP), GRID_Y + (b / 3) * (CELL_H + CELL_GAP), CELL_W, CELL_H};
+        super(state);
     }
 
     @Override
-    protected void init() {
-        left = (width - W) / 2;
-        top = (height - H) / 2;
-        addRenderableWidget(Button.builder(Component.literal("×"), b -> onClose()).bounds(left + W - 16, top + 4, 12, 12).build());
+    protected void onNewRound() {
+        winCount = round.winning.length;
+        cols = Math.max(1, round.cols);
+        cells = round.board.length;
+        rows = Math.max(1, (cells + cols - 1) / cols);
+        coatW = coatH = -1; // coating arrays are rebuilt by layout()
+        if (width > 0) layout();
+    }
 
-        int by = top + H - 24;
-        if (!finished) {
-            addRenderableWidget(Button.builder(Component.translatable("gui.lottery.scratch.reveal_all"), b -> revealAll())
-                    .bounds(left + W / 2 - 45, by, 90, 18).build());
-            return;
+    @Override
+    protected void layout() {
+        cellGap = cols > 5 ? 4 : 6;
+        int maxW = Math.min(width - 16, 460);
+        cellW = Mth.clamp((maxW - 2 * SIDE - (cols - 1) * cellGap) / cols, 28, 64);
+        int gridW = cols * cellW + (cols - 1) * cellGap;
+        int winW = winCount * WIN_W + (winCount - 1) * WIN_GAP;
+        panelW = Math.max(232, Math.max(gridW, winW) + 2 * SIDE);
+        int availH = height - 16 - GRID_Y - 40;
+        cellH = Mth.clamp((availH - (rows - 1) * cellGap) / rows, 16, 30);
+        panelH = GRID_Y + rows * cellH + (rows - 1) * cellGap + 40;
+        gridX = (panelW - gridW) / 2;
+        if (coatW != cellW || coatH != cellH) {
+            // sizes changed (first layout or window resized): restart the coating, keep revealed cells open
+            coatW = cellW;
+            coatH = cellH;
+            int n = winCount + cells;
+            cleared = new boolean[n][];
+            clearedCount = new int[n];
+            for (int i = 0; i < n; i++) {
+                int[] r = cellRect(i);
+                cleared[i] = new boolean[(r[2] / PIX) * (r[3] / PIX)];
+            }
         }
-        Component doneText = round.won()
-                ? Component.translatable("gui.lottery.scratch.collect")
-                : Component.translatable("gui.lottery.scratch.thanks");
-        Button done = Button.builder(doneText, b -> finish(false)).bounds(0, by, 100, 18).build();
-        if (stock > 0) {
-            Button again = Button.builder(Component.translatable("gui.lottery.scratch.again", stock), b -> finish(true))
-                    .bounds(0, by, 100, 18).build();
-            done.setX(left + W / 2 - 104);
-            again.setX(left + W / 2 + 4);
-            done.active = again.active = !waiting;
-            addRenderableWidget(done);
-            addRenderableWidget(again);
-        } else {
-            done.setX(left + W / 2 - 50);
-            done.active = !waiting;
-            addRenderableWidget(done);
+    }
+
+    /** {x, y, w, h} relative to the panel. Cells 0..winCount-1 = winning numbers, then my numbers. */
+    private int[] cellRect(int i) {
+        if (i < winCount) {
+            int total = winCount * WIN_W + (winCount - 1) * WIN_GAP;
+            return new int[]{(panelW - total) / 2 + i * (WIN_W + WIN_GAP), WIN_Y, WIN_W, WIN_H};
         }
+        int b = i - winCount;
+        return new int[]{gridX + (b % cols) * (cellW + cellGap), GRID_Y + (b / cols) * (cellH + cellGap), cellW, cellH};
+    }
+
+    private int cellCount() {
+        return winCount + cells;
+    }
+
+    /** The draw shown in grid cell {@code i} (panel cell index), or null. */
+    private Draw drawAt(int i) {
+        if (i < winCount) return null;
+        int d = round.drawAtCell(i - winCount);
+        return d >= 0 ? round.draws.get(d) : null;
+    }
+
+    @Override
+    protected void addPlayButtons(int y) {
+        button(Component.translatable("gui.lottery.scratch.reveal_all"), left + panelW / 2 - 45, y, 90, b -> revealAll());
     }
 
     // ------------------------------------------------------------------ actions
 
-    private void finish(boolean next) {
-        if (waiting) return;
-        waiting = true;
-        PacketDistributor.sendToServer(new Payloads.Finish(pos, round.roundId, next));
-        if (!next) {
-            onClose();
-        } else {
-            rebuildWidgets();
-        }
-    }
-
     private void revealAll() {
-        int mask = 0;
-        for (int i = 0; i < ScratchRound.CELL_COUNT; i++) {
-            if (!revealed[i]) {
-                revealed[i] = true;
-                mask |= 1 << i;
+        long mask = 0;
+        for (int i = 0; i < cellCount(); i++) {
+            if (!isRevealed(i)) {
+                mask |= 1L << i;
                 burst(i, 6);
             }
         }
-        if (mask != 0) {
-            PacketDistributor.sendToServer(new Payloads.Reveal(pos, round.roundId, mask));
-            play(SoundEvents.BOOK_PAGE_TURN, 1.0F, 1.0F);
-        }
-        checkFinished();
+        if (mask != 0) play(SoundEvents.BOOK_PAGE_TURN, 1.0F, 1.0F);
+        markRevealed(mask);
     }
 
     private void reveal(int i) {
-        if (revealed[i]) return;
-        revealed[i] = true;
+        if (isRevealed(i)) return;
         burst(i, 10);
         play(SoundEvents.BOOK_PAGE_TURN, 1.2F, 0.8F);
-        PacketDistributor.sendToServer(new Payloads.Reveal(pos, round.roundId, 1 << i));
-        checkFinished();
+        markRevealed(1L << i);
     }
 
-    private void checkFinished() {
-        if (finished || !allRevealed()) return;
-        finished = true;
-        if (round.won()) {
-            play(SoundEvents.PLAYER_LEVELUP, 1.0F, 1.0F);
-            int hit = Roller.WINNING_COUNT + round.hitCell;
-            burst(hit, 40);
-        } else {
-            play(SoundEvents.VILLAGER_NO, 1.0F, 0.6F);
-        }
-        rebuildWidgets();
-    }
-
-    private boolean allRevealed() {
-        for (boolean b : revealed) if (!b) return false;
-        return true;
+    @Override
+    protected void onFinished() {
+        super.onFinished();
+        for (int i = winCount; i < cellCount(); i++) if (drawAt(i) != null) burst(i, 30);
     }
 
     // ------------------------------------------------------------------ input
@@ -224,7 +167,7 @@ public class ScratchScreen extends Screen {
     }
 
     private int cellAt(double mx, double my) {
-        for (int i = 0; i < ScratchRound.CELL_COUNT; i++) {
+        for (int i = 0; i < cellCount(); i++) {
             int[] r = cellRect(i);
             if (mx >= left + r[0] && mx < left + r[0] + r[2] && my >= top + r[1] && my < top + r[1] + r[3]) return i;
         }
@@ -233,28 +176,31 @@ public class ScratchScreen extends Screen {
 
     private void scratchAt(double mx, double my) {
         boolean any = false;
-        for (int i = 0; i < ScratchRound.CELL_COUNT; i++) {
-            if (revealed[i]) continue;
+        for (int i = 0; i < cellCount(); i++) {
+            if (isRevealed(i)) continue;
             int[] r = cellRect(i);
             double lx = mx - (left + r[0]), ly = my - (top + r[1]);
             if (lx < -BRUSH || ly < -BRUSH || lx > r[2] + BRUSH || ly > r[3] + BRUSH) continue;
-            int cols = r[2] / PIX, rows = r[3] / PIX;
-            int cx0 = Math.max(0, (int) ((lx - BRUSH) / PIX)), cx1 = Math.min(cols - 1, (int) ((lx + BRUSH) / PIX));
-            int cy0 = Math.max(0, (int) ((ly - BRUSH) / PIX)), cy1 = Math.min(rows - 1, (int) ((ly + BRUSH) / PIX));
+            int cw = r[2] / PIX, ch = r[3] / PIX;
+            int cx0 = Math.max(0, (int) ((lx - BRUSH) / PIX)), cx1 = Math.min(cw - 1, (int) ((lx + BRUSH) / PIX));
+            int cy0 = Math.max(0, (int) ((ly - BRUSH) / PIX)), cy1 = Math.min(ch - 1, (int) ((ly + BRUSH) / PIX));
             for (int cy = cy0; cy <= cy1; cy++) {
                 for (int cx = cx0; cx <= cx1; cx++) {
                     double ddx = cx * PIX + PIX / 2.0 - lx, ddy = cy * PIX + PIX / 2.0 - ly;
                     if (ddx * ddx + ddy * ddy > BRUSH * BRUSH) continue;
-                    int idx = cy * cols + cx;
+                    int idx = cy * cw + cx;
                     if (!cleared[i][idx]) {
                         cleared[i][idx] = true;
                         clearedCount[i]++;
                         any = true;
-                        if (rnd.nextInt(6) == 0) spawnDust(left + r[0] + cx * PIX, top + r[1] + cy * PIX);
+                        if (rnd.nextInt(6) == 0) {
+                            particles.add(new Particle(left + r[0] + cx * PIX, top + r[1] + cy * PIX,
+                                    rnd.nextGaussian() * 0.8, -rnd.nextDouble() * 1.5, 12, 12, 0xC1C1CA, 1 + rnd.nextInt(2)));
+                        }
                     }
                 }
             }
-            if ((float) clearedCount[i] / cleared[i].length >= AUTO_REVEAL) reveal(i);
+            if ((float) clearedCount[i] / Math.max(1, cleared[i].length) >= AUTO_REVEAL) reveal(i);
         }
         if (any) {
             long now = System.currentTimeMillis();
@@ -272,114 +218,97 @@ public class ScratchScreen extends Screen {
         super.renderBackground(g, mouseX, mouseY, partialTick);
         int color = 0xFF000000 | TicketColors.of(round.typeId);
         int dark = 0xFF000000 | TicketColors.dark(round.typeId);
-        // ticket body
-        g.fill(left - 2, top - 2, left + W + 2, top + H + 2, dark);
-        g.fill(left, top, left + W, top + H, 0xFFFBF5E4);
-        // header band
-        g.fill(left, top, left + W, top + 30, color);
-        // perforation dots
-        for (int x = left + 4; x < left + W - 2; x += 6) {
-            g.fill(x, top + 31, x + 2, top + 32, dark);
-        }
+        g.fill(left - 2, top - 2, left + panelW + 2, top + panelH + 2, dark);
+        g.fill(left, top, left + panelW, top + panelH, 0xFFFBF5E4);
+        g.fill(left, top, left + panelW, top + 30, color);
+        for (int x = left + 4; x < left + panelW - 2; x += 6) g.fill(x, top + 31, x + 2, top + 32, dark);
     }
 
     @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         super.render(g, mouseX, mouseY, partialTick);
-        // header text
         g.drawString(font, Component.translatable("gui.lottery.scratch.title", round.typeName), left + 8, top + 6, 0xFFFFFFFF, true);
         g.drawString(font, Component.translatable("gui.lottery.scratch.sub", round.typeId, stock), left + 8, top + 18, 0xFFF0F0F0, false);
 
-        drawLabel(g, Component.translatable("gui.lottery.scratch.winning_numbers"), top + WIN_Y - 10);
+        centered(g, Component.translatable("gui.lottery.scratch.winning_numbers"), top + WIN_Y - 10, 0xFF6A6050);
         if (finished) {
-            Component banner = round.won()
-                    ? Component.translatable("gui.lottery.scratch.won", round.prize.describe())
-                    : Component.translatable("gui.lottery.scratch.lost");
-            int c = round.won() ? 0xFFD08A00 : 0xFF707070;
-            centered(g, banner, top + GRID_Y - 12, c);
+            centered(g, resultBanner(), top + GRID_Y - 12, round.won() ? 0xFFD08A00 : 0xFF707070);
         } else {
-            drawLabel(g, Component.translatable("gui.lottery.scratch.my_numbers"), top + GRID_Y - 12);
+            centered(g, Component.translatable("gui.lottery.scratch.my_numbers"), top + GRID_Y - 12, 0xFF6A6050);
         }
 
-        for (int i = 0; i < ScratchRound.CELL_COUNT; i++) drawCell(g, i, mouseX, mouseY);
+        for (int i = 0; i < cellCount(); i++) drawCell(g, i, mouseX, mouseY);
+        renderParticles(g);
 
-        for (Particle p : particles) {
-            int a = Mth.clamp((int) (255 * p.life / (float) p.maxLife), 0, 255);
-            int x = (int) p.x, y = (int) p.y;
-            g.fill(x, y, x + p.size, y + p.size, (a << 24) | (p.color & 0xFFFFFF));
-        }
-
-        int noteY = top + GRID_Y + 3 * CELL_H + 2 * CELL_GAP + 5;
+        int noteY = top + panelH - 36;
         if (waiting) {
             centered(g, Component.translatable("gui.lottery.scratch.loading"), noteY, 0xFF8A8070);
         } else if (!finished) {
             centered(g, Component.translatable("gui.lottery.scratch.hint"), noteY, 0xFF8A8070);
         }
 
-        // tooltip for the prize icon
-        if (round.won() && revealed[Roller.WINNING_COUNT + round.hitCell]) {
-            int[] r = cellRect(Roller.WINNING_COUNT + round.hitCell);
-            int ix = left + r[0] + r[2] - 22, iy = top + r[1] + (r[3] - 16) / 2;
-            if (mouseX >= ix && mouseX < ix + 16 && mouseY >= iy && mouseY < iy + 16) {
-                g.renderTooltip(font, round.prize.item(), mouseX, mouseY);
+        // tooltip for prize icons
+        for (int i = winCount; i < cellCount(); i++) {
+            Draw d = drawAt(i);
+            if (d == null || !isRevealed(i)) continue;
+            int[] ic = iconPos(i);
+            if (mouseX >= ic[0] && mouseX < ic[0] + 16 && mouseY >= ic[1] && mouseY < ic[1] + 16) {
+                g.renderTooltip(font, d.prize().item(), mouseX, mouseY);
             }
         }
     }
 
-    private void drawLabel(GuiGraphics g, Component text, int y) {
-        centered(g, text, y, 0xFF6A6050);
-    }
-
-    /** Centered text without the drop shadow (shadows look muddy on the light ticket paper). */
-    private void centered(GuiGraphics g, Component text, int y, int color) {
-        g.drawString(font, text, left + (W - font.width(text)) / 2, y, color, false);
+    private int[] iconPos(int i) {
+        int[] r = cellRect(i);
+        return new int[]{left + r[0] + r[2] - 18, top + r[1] + (r[3] - 16) / 2};
     }
 
     private void drawCell(GuiGraphics g, int i, int mouseX, int mouseY) {
         int[] r = cellRect(i);
         int x = left + r[0], y = top + r[1], w = r[2], h = r[3];
-        boolean winningCell = i < Roller.WINNING_COUNT;
-        boolean hit = !winningCell && round.won() && i - Roller.WINNING_COUNT == round.hitCell && revealed[i];
+        boolean winningCell = i < winCount;
+        Draw d = drawAt(i);
+        boolean hit = d != null && isRevealed(i);
 
         int border = winningCell ? 0xFFC9A44A : 0xFFB0A890;
         int bg = winningCell ? 0xFFFFF1CC : 0xFFFFFFFF;
         if (hit) {
             float pulse = (Mth.sin(System.currentTimeMillis() / 150.0F) + 1) / 2;
-            border = pulse > 0.5F ? 0xFFFFB300 : 0xFFFF7A00;
+            int tc = Tier.color(d.tier());
+            border = 0xFF000000 | (pulse > 0.5F ? tc : 0xFFB300);
             bg = 0xFFFFF0A8;
         }
-        g.fill(x - 1, y - 1, x + w + 1, y + h + 1, border);
-        g.fill(x, y, x + w, y + h, bg);
+        frame(g, x, y, w, h, border, bg);
 
         // content under the coating
-        int number = winningCell ? round.winning[i] : round.board[i - Roller.WINNING_COUNT];
+        int number = winningCell ? round.winning[i] : round.board[i - winCount];
         String text = String.valueOf(number);
-        int textColor = winningCell ? 0xFFB03020 : (hit ? 0xFFB03020 : 0xFF303030);
-        float scale = 1.5F;
+        int textColor = winningCell || hit ? 0xFFB03020 : 0xFF303030;
+        float scale = w >= 50 && h >= 22 ? 1.5F : 1.0F;
         int tw = (int) (font.width(text) * scale);
-        int contentW = hit ? w - 24 : w;
+        int contentW = hit ? w - 18 : w;
         g.pose().pushPose();
         g.pose().translate(x + (contentW - tw) / 2.0F, y + (h - 8 * scale) / 2.0F + 1, 0);
         g.pose().scale(scale, scale, 1);
         g.drawString(font, text, 0, 0, textColor, false);
         g.pose().popPose();
         if (hit) {
-            int ix = x + w - 22, iy = y + (h - 16) / 2;
-            g.renderItem(round.prize.item(), ix, iy);
-            g.renderItemDecorations(font, round.prize.item(), ix, iy, String.valueOf(round.prize.count()));
+            int[] ic = iconPos(i);
+            g.renderItem(d.prize().item(), ic[0], ic[1]);
+            g.renderItemDecorations(font, d.prize().item(), ic[0], ic[1], String.valueOf(d.prize().count()));
         }
 
-        if (revealed[i]) return;
+        if (isRevealed(i)) return;
 
         // coating
-        int cols = w / PIX, rows = h / PIX;
+        int cw = w / PIX, ch = h / PIX;
         boolean[] mask = cleared[i];
         g.pose().pushPose();
         g.pose().translate(0, 0, 200); // above item icons
-        for (int cy = 0; cy < rows; cy++) {
+        for (int cy = 0; cy < ch; cy++) {
             int runStart = -1, runColor = 0;
-            for (int cx = 0; cx <= cols; cx++) {
-                boolean covered = cx < cols && !mask[cy * cols + cx];
+            for (int cx = 0; cx <= cw; cx++) {
+                boolean covered = cx < cw && !mask[cy * cw + cx];
                 int c = covered ? coatColor(i, cx, cy) : 0;
                 if (runStart >= 0 && (!covered || c != runColor)) {
                     g.fill(x + runStart * PIX, y + cy * PIX, x + cx * PIX, y + (cy + 1) * PIX, runColor);
@@ -407,46 +336,10 @@ public class ScratchScreen extends Screen {
         return 0xFFC1C1CA;
     }
 
-    // ------------------------------------------------------------------ particles
-
-    private record Particle(double x, double y, double vx, double vy, int life, int maxLife, int color, int size) {
-        Particle step() {
-            return new Particle(x + vx, y + vy, vx * 0.95, vy + 0.35, life - 1, maxLife, color, size);
-        }
-    }
-
-    private void spawnDust(double x, double y) {
-        particles.add(new Particle(x, y, rnd.nextGaussian() * 0.8, -rnd.nextDouble() * 1.5, 12, 12, 0xC1C1CA, 1 + rnd.nextInt(2)));
-    }
-
     private void burst(int cell, int n) {
         int[] r = cellRect(cell);
-        boolean gold = round.won() && cell == Roller.WINNING_COUNT + round.hitCell;
-        for (int k = 0; k < n; k++) {
-            double x = left + r[0] + rnd.nextDouble() * r[2], y = top + r[1] + rnd.nextDouble() * r[3];
-            int color = gold ? (rnd.nextBoolean() ? 0xFFC83A : 0xFF8A00) : 0xB8B8C2;
-            particles.add(new Particle(x, y, rnd.nextGaussian() * 1.5, -1 - rnd.nextDouble() * 2.5, 18, 18, color, 1 + rnd.nextInt(2)));
-        }
-    }
-
-    @Override
-    public void tick() {
-        ticks++;
-        List<Particle> next = new ArrayList<>(particles.size());
-        for (Iterator<Particle> it = particles.iterator(); it.hasNext(); ) {
-            Particle p = it.next().step();
-            if (p.life > 0) next.add(p);
-        }
-        particles.clear();
-        particles.addAll(next);
-    }
-
-    private void play(SoundEvent sound, float pitch, float volume) {
-        minecraft.getSoundManager().play(SimpleSoundInstance.forUI(sound, pitch, volume));
-    }
-
-    @Override
-    public boolean isPauseScreen() {
-        return false;
+        Draw d = drawAt(cell);
+        int color = d != null ? Tier.color(d.tier()) : 0xB8B8C2;
+        burstAt(left + r[0], top + r[1], r[2], r[3], n, color);
     }
 }

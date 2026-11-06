@@ -2,6 +2,7 @@ package com.chatmiao.lottery.logic;
 
 import com.chatmiao.lottery.LotteryConfig;
 import com.chatmiao.lottery.block.ScratchTableBlockEntity;
+import com.chatmiao.lottery.data.Draw;
 import com.chatmiao.lottery.data.LotteryData;
 import com.chatmiao.lottery.data.Prize;
 import com.chatmiao.lottery.data.TicketType;
@@ -17,9 +18,13 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
+import net.minecraft.util.RandomSource;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.items.ItemHandlerHelper;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * 刮奖台 server logic.
@@ -123,32 +128,54 @@ public final class ScratchService {
             return false;
         }
         table.stock--;
-        Prize prize = Roller.roll(type, player.getRandom());
-        Roller.Board board = Roller.buildBoard(player.getRandom(), LotteryConfig.numberRange(), prize != null);
+        RandomSource random = player.getRandom();
+        int[] pity = {data.pity(player.getUUID(), type.id)};
+        List<Draw> draws = Roller.rollTicket(type, random, pity);
+        if (type.pityCount > 0) data.setPity(player.getUUID(), type.id, pity[0]);
 
         ScratchRound round = new ScratchRound();
         round.roundId = table.nextRoundId++;
         round.typeId = type.id;
         round.typeName = type.name;
-        round.winning = board.winning();
-        round.board = board.board();
-        round.hitCell = board.hitCell();
-        round.prize = prize;
+        round.style = type.playStyle().id;
+        round.cols = type.cols;
+        round.rows = type.rows;
+        round.cardCols = type.cardCols;
+        round.spinSeconds = type.spinSeconds;
+        round.rareEffect = type.rareEffect;
+        round.draws = draws;
+        switch (type.playStyle()) {
+            case MATCH -> {
+                Roller.Board board = Roller.buildBoard(random, type.effectiveRange(LotteryConfig.numberRange()),
+                        type.winCount, type.cells(), draws);
+                round.winning = board.winning();
+                round.board = board.board();
+                round.hitCells = board.hitCells();
+            }
+            case CASE -> {
+                Roller.Reels reels = Roller.buildReels(type, random, draws.size());
+                round.palette = reels.palette();
+                round.paletteTier = reels.paletteTier();
+                round.reels = reels.reels();
+            }
+            case CARDS -> { }
+        }
         type.scratched++;
-        if (prize != null) {
+        List<Prize> prizes = round.prizes();
+        if (!prizes.isEmpty()) {
             type.wins++;
             WinRecord rec = new WinRecord();
-            rec.winId = data.newWinId(type.id, player.getRandom());
+            rec.winId = data.newWinId(type.id, random);
             rec.typeId = type.id;
             rec.typeName = type.name;
-            rec.prize = prize;
+            rec.prizes = new ArrayList<>(prizes);
             rec.winnerId = player.getUUID();
             rec.winnerName = player.getGameProfile().getName();
             rec.rolledAt = System.currentTimeMillis();
             data.addWin(rec);
             round.winId = rec.winId;
             LotteryLog.log(player.server, "WIN", LotteryLog.who(player) + " type #" + type.id + " " + type.name
-                    + " -> " + rec.winId + " " + prize.item().getItem() + " x" + prize.count());
+                    + " -> " + rec.winId + " " + LotteryLog.prizes(prizes) + " (" + draws.size() + " draws, pity " + pity[0] + ")");
         } else {
             LotteryLog.log(player.server, "ROLL", LotteryLog.who(player) + " type #" + type.id + " " + type.name + " -> no prize");
         }
@@ -159,10 +186,10 @@ public final class ScratchService {
     }
 
     /** Client revealed some cells (only used to restore progress when the GUI is reopened). */
-    public static void reveal(ServerPlayer player, BlockPos pos, int roundId, int mask) {
+    public static void reveal(ServerPlayer player, BlockPos pos, int roundId, long mask) {
         ScratchTableBlockEntity table = tableFor(player, pos);
         if (table == null || table.round == null || table.round.roundId != roundId) return;
-        table.round.revealedMask |= mask & ScratchRound.ALL_CELLS;
+        table.round.revealedMask |= mask & table.round.allMask();
         table.setChanged();
     }
 
@@ -174,7 +201,7 @@ public final class ScratchService {
         table.round = null;
         if (round.won()) {
             ItemHandlerHelper.giveItemToPlayer(player, winningTicket(round, table.ownerName));
-            player.displayClientMessage(Component.translatable("message.lottery.table.got_winning_ticket", round.prize.describe())
+            player.displayClientMessage(Component.translatable("message.lottery.table.got_winning_ticket", Prize.summary(round.prizes()))
                     .withStyle(ChatFormatting.GOLD), false);
         }
         table.changed();
@@ -186,7 +213,7 @@ public final class ScratchService {
     }
 
     public static ItemStack winningTicket(ScratchRound round, String winner) {
-        return WinningTicketItem.create(new WinTicketData(round.winId, round.typeId, round.typeName, winner, round.prize.describe()));
+        return WinningTicketItem.create(new WinTicketData(round.winId, round.typeId, round.typeName, winner, Prize.summary(round.prizes())));
     }
 
     private static void sendState(ServerPlayer player, BlockPos pos, ScratchTableBlockEntity table) {

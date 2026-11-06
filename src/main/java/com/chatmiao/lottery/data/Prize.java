@@ -40,6 +40,13 @@ public record Prize(ItemStack item, int count) {
         return Component.empty().append(item.getHoverName()).append(" ×" + count);
     }
 
+    /** "钻石 ×5" for one prize, "钻石 ×5 等 4 件奖品" for several. */
+    public static Component summary(List<Prize> prizes) {
+        if (prizes.isEmpty()) return Component.empty();
+        if (prizes.size() == 1) return prizes.get(0).describe();
+        return Component.translatable("gui.lottery.prizes_more", prizes.get(0).describe(), prizes.size());
+    }
+
     public CompoundTag save(HolderLookup.Provider provider) {
         CompoundTag tag = new CompoundTag();
         tag.put("item", item.save(provider));

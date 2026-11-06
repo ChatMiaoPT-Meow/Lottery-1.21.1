@@ -69,7 +69,8 @@ public final class RedeemService {
         List<Component> errors = new ArrayList<>();
         Inventory inv = player.getInventory();
         for (String winId : new LinkedHashSet<>(winIds)) {
-            if (prizes.size() + errors.size() >= 256) break;
+            // the result packet holds at most 256 entries; one ticket adds up to 10 prizes
+            if (prizes.size() + errors.size() >= 256 - 10) break;
             int slot = findTicket(inv, winId);
             if (slot < 0) {
                 errors.add(Component.translatable("message.lottery.station.not_found", winId));
@@ -87,10 +88,12 @@ public final class RedeemService {
             rec.redeemerName = player.getGameProfile().getName();
             data.setDirty();
             inv.removeItemNoUpdate(slot);
-            for (ItemStack s : rec.prize.toStacks()) ItemHandlerHelper.giveItemToPlayer(player, s);
-            prizes.add(rec.prize);
+            for (Prize prize : rec.prizes) {
+                for (ItemStack s : prize.toStacks()) ItemHandlerHelper.giveItemToPlayer(player, s);
+                prizes.add(prize);
+            }
             LotteryLog.log(player.server, "REDEEM", LotteryLog.who(player) + " redeemed " + winId + " (type #" + rec.typeId
-                    + ", won by " + rec.winnerName + ") -> " + rec.prize.item().getItem() + " x" + rec.prize.count());
+                    + ", won by " + rec.winnerName + ") -> " + LotteryLog.prizes(rec.prizes));
         }
         inv.setChanged();
         if (!prizes.isEmpty()) {
