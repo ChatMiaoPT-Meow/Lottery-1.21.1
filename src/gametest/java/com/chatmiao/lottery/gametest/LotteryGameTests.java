@@ -429,6 +429,8 @@ public class LotteryGameTests {
         com.chatmiao.lottery.logic.HubService.pull(player, type.id, true);
         var s = data.session(player.getUUID());
         h.assertTrue(s != null && s.round.draws.size() == 10 && s.multi, "a 10-pull session must be open");
+        // all ten draws are iron: only the first one is "NEW" for this player
+        h.assertTrue(s.newMask == 1L, "only the first iron is new, mask=" + Long.toBinaryString(s.newMask));
         h.assertTrue(countVouchers(player, v.id) == 3, "10-pull costs 9, left " + countVouchers(player, v.id));
         h.assertTrue(countItem(player, Items.IRON_INGOT) == 0, "prizes are only handed out when collected");
 
@@ -453,6 +455,7 @@ public class LotteryGameTests {
         com.chatmiao.lottery.logic.HubService.pull(player, type.id, false);
         var s2 = data.session(player.getUUID());
         h.assertTrue(s2 != null && s2.round.draws.size() == 1 && countVouchers(player, v.id) == 2, "single pull costs 1");
+        h.assertTrue(s2.newMask == 0, "iron is not new any more");
         com.chatmiao.lottery.logic.HubService.finish(player, s2.round.roundId, true);
         var s3 = data.session(player.getUUID());
         h.assertTrue(s3 != null && s3 != s2 && countVouchers(player, v.id) == 1, "again must start a new paid pull");

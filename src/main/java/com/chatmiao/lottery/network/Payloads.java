@@ -148,7 +148,8 @@ public final class Payloads {
     }
 
     /** A locked gacha pull to animate. {@code direct}: prizes go to the inventory (else a winning ticket). */
-    public record HubState(ScratchRound round, boolean direct, int voucherId, int againCost, boolean canAgain) implements CustomPacketPayload {
+    public record HubState(ScratchRound round, boolean direct, int voucherId, int againCost, boolean canAgain, long newMask)
+            implements CustomPacketPayload {
         public static final Type<HubState> TYPE = payloadType("hub_state");
         public static final StreamCodec<RegistryFriendlyByteBuf, HubState> CODEC = StreamCodec.of(
                 (buf, p) -> {
@@ -157,8 +158,10 @@ public final class Payloads {
                     buf.writeVarInt(p.voucherId);
                     buf.writeVarInt(p.againCost);
                     buf.writeBoolean(p.canAgain);
+                    buf.writeLong(p.newMask);
                 },
-                buf -> new HubState(ScratchRound.read(buf), buf.readBoolean(), buf.readVarInt(), buf.readVarInt(), buf.readBoolean()));
+                buf -> new HubState(ScratchRound.read(buf), buf.readBoolean(), buf.readVarInt(), buf.readVarInt(), buf.readBoolean(),
+                        buf.readLong()));
 
         @Override
         public Type<? extends CustomPacketPayload> type() {

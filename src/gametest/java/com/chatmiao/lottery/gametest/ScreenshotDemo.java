@@ -144,23 +144,31 @@ public final class ScreenshotDemo {
             case 600 -> mc.setScreen(new TerminalScreen(new Payloads.OpenTerminal(hubTypes(), sampleVouchers(), 6, 1000)));
             case 602 -> press(mc, "gui.lottery.terminal.tab_hub");
             case 608 -> shot(mc, "2f_terminal_hub");
-            case 610 -> {
+            // pull: vouchers fly into the button → summon (meteor, impact, rays) → result wall with NEW badges
+            case 610 -> mc.setScreen(new com.chatmiao.lottery.client.GachaScreen(hubData()));
+            case 616 -> pressLabel(mc, Component.translatable("gui.lottery.hub.pull_multi", 10, 9).getString());
+            case 621 -> shot(mc, "14a_voucher_fly");
+            case 624 -> mc.setScreen(new com.chatmiao.lottery.client.SummonScreen(new Payloads.HubState(cardRound(), true, 1, 9, true, NEW_MASK)));
+            case 634 -> shot(mc, "14b_summon_meteor");
+            case 651 -> shot(mc, "14c_summon_impact");
+            case 658 -> shot(mc, "14d_summon_rays");
+            case 672 -> {
                 ScratchRound r = cardRound();
                 r.revealedMask = r.allMask();
-                mc.setScreen(PlayScreen.create(new Payloads.HubState(r, true, 1, 9, true)));
+                mc.setScreen(PlayScreen.create(new Payloads.HubState(r, true, 1, 9, true, NEW_MASK)));
             }
-            case 626 -> shot(mc, "13_gacha_result");
-            case 640 -> mc.setScreen(new RedeemScreen(new Payloads.OpenRedeem(BlockPos.ZERO, List.of(
+            case 720 -> shot(mc, "13_gacha_result");
+            case 730 -> mc.setScreen(new RedeemScreen(new Payloads.OpenRedeem(BlockPos.ZERO, List.of(
                     new Payloads.RedeemEntry("W2-ABCDEFGH", "夏日限定"), new Payloads.RedeemEntry("W2-JKLMNPQR", "夏日限定")))));
-            case 660 -> shot(mc, "6_redeem_box");
-            case 670 -> {
+            case 750 -> shot(mc, "6_redeem_box");
+            case 760 -> {
                 if (mc.screen instanceof RedeemScreen rs) {
                     rs.onResult(new Payloads.RedeemResult(List.of(
                             new Prize(new ItemStack(Items.DIAMOND), 5), new Prize(new ItemStack(Items.GOLD_INGOT), 12)), List.of()));
                 }
             }
-            case 692 -> shot(mc, "7_redeem_opened");
-            case 710 -> mc.stop();
+            case 782 -> shot(mc, "7_redeem_opened");
+            case 800 -> mc.stop();
             default -> {}
         }
     }
@@ -240,9 +248,15 @@ public final class ScreenshotDemo {
         mc.setScreen(PlayScreen.create(new Payloads.ScratchState(BlockPos.ZERO, round, stock)));
     }
 
+    /** Sample "NEW" draws in {@link #cardRound()}: the diamond, emerald and nether star. */
+    private static final long NEW_MASK = (1L << 4) | (1L << 6) | (1L << 8);
+
     /** Presses the visible button whose label is the given translation. */
     private static void press(Minecraft mc, String key) {
-        String label = Component.translatable(key).getString();
+        pressLabel(mc, Component.translatable(key).getString());
+    }
+
+    private static void pressLabel(Minecraft mc, String label) {
         for (var w : mc.screen.children()) {
             if (w instanceof Button b && b.visible && b.active && b.getMessage().getString().equals(label)) {
                 b.onPress();

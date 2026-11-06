@@ -14,12 +14,15 @@ public final class HubSession {
     public boolean multi;
     /** {@link com.chatmiao.lottery.data.TicketType#DELIVER_DIRECT} or DELIVER_TICKET, fixed at pull time. */
     public int delivery;
+    /** Bit per draw: the player got this item from the gacha for the first time ("NEW"). */
+    public long newMask;
 
     public CompoundTag save(HolderLookup.Provider provider) {
         CompoundTag tag = new CompoundTag();
         tag.put("round", round.save(provider));
         tag.putBoolean("multi", multi);
         tag.putInt("delivery", delivery);
+        tag.putLong("newMask", newMask);
         return tag;
     }
 
@@ -28,6 +31,7 @@ public final class HubSession {
         s.round = ScratchRound.load(tag.getCompound("round"), provider);
         s.multi = tag.getBoolean("multi");
         s.delivery = tag.getInt("delivery");
+        s.newMask = tag.getLong("newMask");
         return s;
     }
 }

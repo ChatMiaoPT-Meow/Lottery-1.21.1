@@ -52,6 +52,13 @@ public class GachaScreen extends Screen {
     private int ticks;
 
     private int W, H, left, top, rx, rw, bodyTop, bodyBottom;
+    /** Voucher-fly animation before a pull is sent: start tick (-1 = idle), chips, multi flag, endpoints. */
+    private int flyStart = -1, flyCount;
+    private boolean flyMulti;
+    private float flyFromX, flyFromY, flyToX, flyToY;
+    private final Map<Integer, int[]> chipPos = new java.util.HashMap<>();
+    private int[] singleCenter = new int[2], multiCenter = new int[2];
+    private static final int FLY_TICKS = 9;
 
     public GachaScreen(Payloads.OpenHub data) {
         super(Component.translatable("gui.lottery.hub"));
@@ -67,6 +74,7 @@ public class GachaScreen extends Screen {
         entries = new ArrayList<>(data.entries());
         balances = data.balances();
         waiting = false;
+        flyStart = -1;
         sel = 0;
         for (int i = 0; i < entries.size(); i++) if (entries.get(i).typeId == lastTypeId) sel = i;
     }
@@ -108,11 +116,13 @@ public class GachaScreen extends Screen {
                 .bounds(rx + rw - bw * (e.multi > 0 ? 2 : 1) - (e.multi > 0 ? 4 : 0), by, bw, 20).build();
         single.active = !waiting && balance(e.voucherId) >= e.costSingle;
         addRenderableWidget(single);
+        singleCenter = new int[]{single.getX() + single.getWidth() / 2, single.getY() + 10};
         if (e.multi > 0) {
             Button multi = Button.builder(Component.translatable("gui.lottery.hub.pull_multi", e.multi, e.costMulti), b -> pull(true))
                     .bounds(rx + rw - bw, by, bw, 20).build();
             multi.active = !waiting && balance(e.voucherId) >= e.costMulti;
             addRenderableWidget(multi);
+            multiCenter = new int[]{multi.getX() + multi.getWidth() / 2, multi.getY() + 10};
         }
         addRenderableWidget(Button.builder(Component.translatable("gui.lottery.hub.odds"), b -> openOverlay(OVERLAY_ODDS))
                 .bounds(rx, by + 4, 54, 16).build());
@@ -120,13 +130,54 @@ public class GachaScreen extends Screen {
                 .bounds(rx + 58, by + 4, 54, 16).build());
     }
 
+    /** The vouchers fly from the balance into the button first; the request goes out when they land. */
     private void pull(boolean multi) {
         HubEntry e = current();
         if (e == null || waiting) return;
         waiting = true;
         lastTypeId = e.typeId;
-        PacketDistributor.sendToServer(new Payloads.HubPull(e.typeId, multi));
+        flyStart = ticks;
+        flyMulti = multi;
+        flyCount = Mth.clamp(multi ? e.costMulti : e.costSingle, 1, 10);
+        int[] from = chipPos.getOrDefault(e.voucherId, new int[]{left + W - 40, top + 13});
+        int[] to = multi ? multiCenter : singleCenter;
+        flyFromX = from[0];
+        flyFromY = from[1];
+        flyToX = to[0];
+        flyToY = to[1];
         rebuildWidgets();
+    }
+
+    private void sendPull() {
+        HubEntry e = current();
+        if (e != null) PacketDistributor.sendToServer(new Payloads.HubPull(e.typeId, flyMulti));
+    }
+
+    private void drawFlyingVouchers(GuiGraphics g, float t) {
+        if (flyStart < 0) return;
+        HubEntry e = current();
+        int c = 0xFF000000 | VoucherNames.color(e == null ? 0 : e.voucherId);
+        g.pose().pushPose();
+        g.pose().translate(0, 0, 300);
+        for (int k = 0; k < flyCount; k++) {
+            float p = (t - flyStart - k * 0.6F) / (FLY_TICKS - 3);
+            if (p <= 0 || p >= 1) continue;
+            // arc over the panel: quadratic bezier with a control point above the midpoint
+            float mx = (flyFromX + flyToX) / 2, my = Math.min(flyFromY, flyToY) - 40;
+            float u = 1 - p;
+            float x = u * u * flyFromX + 2 * u * p * mx + p * p * flyToX;
+            float y = u * u * flyFromY + 2 * u * p * my + p * p * flyToY;
+            g.fill((int) x - 5, (int) y - 4, (int) x + 5, (int) y + 4, 0xFFFFFFFF);
+            g.fill((int) x - 4, (int) y - 3, (int) x + 4, (int) y + 3, c);
+        }
+        // a pulse on the button as they land
+        float land = (t - flyStart - (FLY_TICKS - 3)) / 4F;
+        if (land > 0 && land < 1) {
+            int a = (int) ((1 - land) * 160);
+            int r = (int) (10 + land * 30);
+            g.fill((int) flyToX - r, (int) flyToY - r / 3, (int) flyToX + r, (int) flyToY + r / 3, (a << 24) | (c & 0xFFFFFF));
+        }
+        g.pose().popPose();
     }
 
     private void openOverlay(int which) {
@@ -234,6 +285,7 @@ public class GachaScreen extends Screen {
             g.drawString(font, w, rx + rw - font.width(w), bodyBottom - 36, C_ACCENT, false);
         }
 
+        drawFlyingVouchers(g, ticks + partialTick);
         if (ov) {
             drawOverlay(g, mouseX, mouseY);
         } else if (!tooltip.isEmpty()) {
@@ -253,6 +305,7 @@ public class GachaScreen extends Screen {
             if (x - w < left + 60) break;
             x -= w;
             g.fill(x, top + 9, x + 8, top + 17, 0xFF000000 | VoucherNames.color(b.getKey()));
+            chipPos.put(b.getKey(), new int[]{x + 4, top + 13});
             g.drawString(font, text, x + 11, top + 9, b.getValue() > 0 ? C_TEXT : C_DIM, false);
             x -= 8;
         }
@@ -265,7 +318,21 @@ public class GachaScreen extends Screen {
         int dark = 0xFF000000 | TicketColors.dark(e.typeId);
         int bh = 54;
         g.fill(rx, bodyTop, rx + rw, bodyTop + bh, dark);
+        g.fillGradient(rx, bodyTop, rx + rw, bodyTop + bh, (0x60 << 24) | (color & 0xFFFFFF), 0x00000000);
         g.fill(rx, bodyTop, rx + rw, bodyTop + 3, color);
+        // a slanted band of light sweeping across the banner every few seconds
+        float sweep = ((ticks + minecraft.getTimer().getGameTimeDeltaPartialTick(false)) % 70) / 70F;
+        int bandX = rx - 40 + (int) (sweep * (rw + 80));
+        g.enableScissor(rx, bodyTop, rx + rw, bodyTop + bh);
+        for (int row = 0; row < bh; row += 2) {
+            int shift = (bh - row) / 3; // slant
+            for (int dx = 0; dx < 18; dx += 2) {
+                int a = (int) (55 * (1 - Math.abs(dx - 9) / 9F));
+                int x = bandX + dx + shift;
+                g.fill(x, bodyTop + row, x + 2, bodyTop + row + 2, (a << 24) | 0xFFFFFF);
+            }
+        }
+        g.disableScissor();
         // drifting sparkles on the banner
         for (int k = 0; k < 14; k++) {
             int sx = rx + (int) ((k * 53 + ticks * (0.3 + k % 3 * 0.2)) % rw);
@@ -324,9 +391,21 @@ public class GachaScreen extends Screen {
             g.drawString(font, Language.getInstance().getVisualOrder(font.substrByWidth(pity, rw - font.width(count) - 6)), rx, y, C_DIM, false);
             g.drawString(font, count, rx + rw - font.width(count), y, C_DIM, false);
             y += 11;
+            int tc = Tier.color(e.pityTier);
+            boolean close = pullsLeft <= Math.max(3, e.pityCount / 10);
+            if (close) {
+                // nearly there: the bar glows and pulses
+                int a = (int) (90 + 90 * Mth.sin(ticks * 0.35F));
+                g.fill(rx - 2, y - 2, rx + rw + 2, y + 7, (a << 24) | tc);
+            }
             g.fill(rx, y, rx + rw, y + 5, C_INSET);
             int fill = (int) (rw * Mth.clamp(e.pityNow / (double) e.pityCount, 0, 1));
-            g.fill(rx, y, rx + fill, y + 5, 0xFF000000 | Tier.color(e.pityTier));
+            g.fill(rx, y, rx + fill, y + 5, 0xFF000000 | tc);
+            if (fill > 6) {
+                // a highlight running along the filled part
+                int hx = rx + (int) ((ticks * 2.5F) % fill);
+                g.fill(hx, y, Math.min(rx + fill, hx + 6), y + 5, 0x90FFFFFF);
+            }
             y += 8;
         }
         if (e.guaranteeTier >= 0 && e.multi > 1) {
@@ -486,6 +565,13 @@ public class GachaScreen extends Screen {
     @Override
     public void tick() {
         ticks++;
+        if (flyStart >= 0) {
+            int k = ticks - flyStart;
+            if (k <= flyCount) minecraft.getSoundManager().play(
+                    net.minecraft.client.resources.sounds.SimpleSoundInstance.forUI(net.minecraft.sounds.SoundEvents.NOTE_BLOCK_PLING.value(),
+                            1.2F + k * 0.08F, 0.35F));
+            if (k == FLY_TICKS) sendPull();
+        }
     }
 
     @Override

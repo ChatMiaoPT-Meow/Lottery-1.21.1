@@ -137,6 +137,10 @@ public final class HubService {
         s.round = round;
         s.multi = multi;
         s.delivery = type.delivery;
+        for (int i = 0; i < rolled.size() && i < 64; i++) {
+            Draw d = rolled.get(i);
+            if (d.won() && data.markObtained(player.getUUID(), itemKey(d.prize().item()))) s.newMask |= 1L << i;
+        }
         data.setSession(player.getUUID(), s);
 
         PullRecord rec = new PullRecord();
@@ -204,7 +208,12 @@ public final class HubService {
             voucherId = type.voucherId;
             canAgain = draws > 0 && balances(player).getOrDefault(voucherId, 0) >= cost;
         }
-        Network.send(player, new Payloads.HubState(s.round, s.delivery == TicketType.DELIVER_DIRECT, voucherId, cost, canAgain));
+        Network.send(player, new Payloads.HubState(s.round, s.delivery == TicketType.DELIVER_DIRECT, voucherId, cost, canAgain, s.newMask));
+    }
+
+    /** Identity of a prize for the "NEW" badge: the item id (components such as custom coins are not told apart). */
+    static String itemKey(ItemStack stack) {
+        return net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
     }
 
     private static void fail(ServerPlayer player, String key) {

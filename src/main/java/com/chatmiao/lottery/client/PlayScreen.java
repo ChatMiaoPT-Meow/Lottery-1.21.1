@@ -30,19 +30,25 @@ import java.util.Random;
  */
 public abstract class PlayScreen extends Screen {
     private static final int INTRO_TICKS = 7;
-    private static final int TILE = 26;
+    private static final int TILE = 26, WALL_W = 30, WALL_H = 66;
 
     /**
      * Where the round comes from: a scratch table (pos + tickets left on it) or a gacha pull
      * (prizes direct or as a winning ticket, and what "再抽一次" costs).
      */
-    public record Source(BlockPos pos, int stock, boolean hub, boolean direct, int voucherId, int againCost, boolean canAgain) {
+    public record Source(BlockPos pos, int stock, boolean hub, boolean direct, int voucherId, int againCost, boolean canAgain,
+                         long newMask) {
         public static Source of(Payloads.ScratchState s) {
-            return new Source(s.pos(), s.stock(), false, false, 0, 0, false);
+            return new Source(s.pos(), s.stock(), false, false, 0, 0, false, 0);
         }
 
         public static Source of(Payloads.HubState s) {
-            return new Source(BlockPos.ZERO, 0, true, s.direct(), s.voucherId(), s.againCost(), s.canAgain());
+            return new Source(BlockPos.ZERO, 0, true, s.direct(), s.voucherId(), s.againCost(), s.canAgain(), s.newMask());
+        }
+
+        /** The draw at {@code index} is a first-time item for this player. */
+        public boolean isNew(int index) {
+            return index >= 0 && index < 64 && (newMask & (1L << index)) != 0;
         }
     }
 
@@ -289,12 +295,35 @@ public abstract class PlayScreen extends Screen {
         return wins;
     }
 
+    /** Gacha multi-pulls show every draw as a tall card (展示墙) instead of prize tiles. */
+    private boolean wallMode() {
+        return source.hub() && round.draws.size() > 1;
+    }
+
+    /** Draw indices to show: prizes by rarity (rarest first); in wall mode the empty draws follow. */
+    private List<Integer> order() {
+        List<Integer> idx = new ArrayList<>();
+        for (int i = 0; i < round.draws.size(); i++) if (round.draws.get(i).won() || wallMode()) idx.add(i);
+        idx.sort((a, b) -> Integer.compare(round.draws.get(b).tier(), round.draws.get(a).tier()));
+        return idx;
+    }
+
+    private int cellW() {
+        return wallMode() ? WALL_W : TILE;
+    }
+
+    private int cellH() {
+        return wallMode() ? WALL_H : TILE;
+    }
+
     private void initSummary() {
-        int n = sortedWins().size();
-        sCols = Math.min(5, Math.max(1, n));
+        int n = order().size();
+        int gap = wallMode() ? 4 : 6;
+        sCols = wallMode() ? n : Math.min(5, Math.max(1, n));
+        if (wallMode() && n * (WALL_W + gap) + 30 > width - 20) sCols = (n + 1) / 2; // two rows on narrow screens
         int rows = (n + sCols - 1) / sCols;
-        sw = Math.max(230, sCols * (TILE + 6) + 30);
-        sh = 58 + rows * (TILE + 6) + 34;
+        sw = Math.max(230, sCols * (cellW() + gap) + 30);
+        sh = 58 + rows * (cellH() + 6) + 34;
         sx = (width - sw) / 2;
         sy = (height - sh) / 2;
         List<Button> buttons = resultButtons(sx + sw / 2, sy + sh - 26);
@@ -340,30 +369,45 @@ public abstract class PlayScreen extends Screen {
         Component sub = Component.translatable("gui.lottery.summary.sub", wins.size(), Tier.name(best));
         g.drawString(font, sub, cx - font.width(sub) / 2, sy + 44, 0xFFB0B4BC, false);
 
-        int rows = (wins.size() + sCols - 1) / sCols;
+        List<Integer> order = order();
+        boolean wall = wallMode();
+        int gap = wall ? 4 : 6, w = cellW(), h = cellH();
+        int rows = (order.size() + sCols - 1) / sCols;
         Draw hovered = null;
-        for (int i = 0; i < wins.size(); i++) {
-            float appear = (t - 6 - i * 3) / 4F;
+        for (int i = 0; i < order.size(); i++) {
+            float appear = (t - 6 - i * 3) / (wall ? 5F : 4F);
             if (appear <= 0) continue;
             int row = i / sCols, col = i % sCols;
-            int inRow = Math.min(sCols, wins.size() - row * sCols);
-            int x = cx - (inRow * (TILE + 6) - 6) / 2 + col * (TILE + 6);
-            int y = sy + 58 + row * (TILE + 6);
-            Draw d = wins.get(i);
-            int tc = 0xFF000000 | Tier.color(d.tier());
+            int inRow = Math.min(sCols, order.size() - row * sCols);
+            int x = cx - (inRow * (w + gap) - gap) / 2 + col * (w + gap);
+            int y = sy + 58 + row * (h + 6);
+            int index = order.get(i);
+            Draw d = round.draws.get(index);
             float s = popScale(appear);
             g.pose().pushPose();
-            g.pose().translate(x + TILE / 2F, y + TILE / 2F, 0);
+            if (wall) {
+                // cards slide in from the right while growing
+                float slide = (1 - Mth.clamp(appear, 0, 1)) * 24;
+                g.pose().translate(x + slide + w / 2F, y + h / 2F, 0);
+            } else {
+                g.pose().translate(x + w / 2F, y + h / 2F, 0);
+            }
             g.pose().scale(s, s, 1);
-            g.pose().translate(-TILE / 2F, -TILE / 2F, 0);
-            g.fill(-1, -1, TILE + 1, TILE + 1, tc);
-            g.fill(0, 0, TILE, TILE, 0xFF2A2E36);
-            g.fill(0, TILE - 3, TILE, TILE, tc);
-            g.renderItem(d.prize().item(), (TILE - 16) / 2, (TILE - 16) / 2 - 1);
-            g.renderItemDecorations(font, d.prize().item(), (TILE - 16) / 2, (TILE - 16) / 2 - 1,
-                    d.prize().count() > 1 ? String.valueOf(d.prize().count()) : null);
+            g.pose().translate(-w / 2F, -h / 2F, 0);
+            if (wall) {
+                drawWallCard(g, d, w, h, t - 6 - i * 3, source.isNew(index));
+            } else {
+                int tc = 0xFF000000 | Tier.color(d.tier());
+                g.fill(-1, -1, w + 1, h + 1, tc);
+                g.fill(0, 0, w, h, 0xFF2A2E36);
+                g.fill(0, h - 3, w, h, tc);
+                g.renderItem(d.prize().item(), (w - 16) / 2, (h - 16) / 2 - 1);
+                g.renderItemDecorations(font, d.prize().item(), (w - 16) / 2, (h - 16) / 2 - 1,
+                        d.prize().count() > 1 ? String.valueOf(d.prize().count()) : null);
+                if (source.isNew(index)) newBadge(g, w);
+            }
             g.pose().popPose();
-            if (mouseX >= x && mouseX < x + TILE && mouseY >= y && mouseY < y + TILE) hovered = d;
+            if (d.won() && mouseX >= x && mouseX < x + w && mouseY >= y && mouseY < y + h) hovered = d;
         }
         g.pose().popPose();
 
@@ -371,10 +415,62 @@ public abstract class PlayScreen extends Screen {
         g.pose().translate(0, 0, 500);
         for (Button b : overlayButtons) b.render(g, mouseX, mouseY, pt);
         if (waiting) {
-            Component w = Component.translatable("gui.lottery.scratch.loading");
-            g.drawString(font, w, cx - font.width(w) / 2, sy + 58 + rows * (TILE + 6), 0xFF9AA0AA, false);
+            Component wt = Component.translatable("gui.lottery.scratch.loading");
+            g.drawString(font, wt, cx - font.width(wt) / 2, sy + 58 + rows * (h + 6), 0xFF9AA0AA, false);
         }
         if (hovered != null) g.renderTooltip(font, hovered.prize().item(), mouseX, mouseY);
+        g.pose().popPose();
+    }
+
+    /**
+     * One card of the result wall, drawn at the origin: rarity-coloured glow rising from the bottom, the item,
+     * the amount and rarity pips; epic+ cards get a light pillar, legendary+ a pulsing halo. Empty draws are dim.
+     */
+    private void drawWallCard(GuiGraphics g, Draw d, int w, int h, float age, boolean isNew) {
+        if (!d.won()) {
+            g.fill(0, 0, w, h, 0xFF3A3E46);
+            g.fill(1, 1, w - 1, h - 1, 0xFF202228);
+            g.drawString(font, "—", (w - font.width("—")) / 2, h / 2 - 4, 0xFF5A5E66, false);
+            return;
+        }
+        int tier = d.tier();
+        int c = Tier.color(tier);
+        float pulse = 0.5F + 0.5F * Mth.sin((ticks + age) * 0.25F);
+        if (tier >= 4) {
+            int a = (int) (70 + 110 * pulse);
+            g.fill(-3, -3, w + 3, h + 3, (a << 24) | c);
+        }
+        g.fill(0, 0, w, h, 0xFF000000 | c);
+        g.fillGradient(1, 1, w - 1, h - 1, 0xFF15171C, (0xD0 << 24) | (c & 0xFFFFFF));
+        if (tier >= 3) lightPillar(g, 2, 1, h - 12, w - 4, c, 0.35F + 0.25F * pulse);
+        g.fill(1, 1, w - 1, 3, 0xFF000000 | c);
+        // the item, larger when the card is wide enough
+        float scale = w >= 28 ? 1.5F : 1.0F;
+        int icon = (int) (16 * scale);
+        g.pose().pushPose();
+        g.pose().translate((w - icon) / 2F, h / 2F - icon / 2F - 6, 0);
+        g.pose().scale(scale, scale, 1);
+        g.renderItem(d.prize().item(), 0, 0);
+        g.pose().popPose();
+        g.pose().pushPose();
+        g.pose().translate(0, 0, 200);
+        String amount = "×" + d.prize().count();
+        g.drawString(font, amount, (w - font.width(amount)) / 2, h - 20, 0xFFFFFFFF, true);
+        // rarity pips (one per tier step)
+        int pips = tier + 1, pw = pips * 3 - 1;
+        for (int k = 0; k < pips; k++) g.fill((w - pw) / 2 + k * 3, h - 8, (w - pw) / 2 + k * 3 + 2, h - 6, 0xFFFFFFFF);
+        if (isNew) newBadge(g, w);
+        g.pose().popPose();
+    }
+
+    /** "NEW" tag in the top-right corner of a {@code w}-wide cell drawn at the origin. */
+    private void newBadge(GuiGraphics g, int w) {
+        String s = Component.translatable("gui.lottery.summary.new").getString();
+        int bw = font.width(s) + 4;
+        g.pose().pushPose();
+        g.pose().translate(0, 0, 250);
+        g.fill(w - bw + 3, -4, w + 3, 6, 0xFFFF5A3C);
+        g.drawString(font, s, w - bw + 5, -3, 0xFFFFFFFF, false);
         g.pose().popPose();
     }
 
@@ -495,12 +591,19 @@ public abstract class PlayScreen extends Screen {
         particles.addAll(next);
         if (summaryVisible() != builtWithSummary) rebuildWidgets();
         if (builtWithSummary) {
-            // a soft chime for every prize tile that pops in, pitched by rarity
-            List<Draw> wins = sortedWins();
-            int shown = Mth.clamp((ticks - summaryShownAt - 6) / 3 + 1, 0, wins.size());
+            // a chime for every card/tile that pops in, pitched by rarity (a soft click for empty draws)
+            List<Integer> order = order();
+            int shown = Mth.clamp((ticks - summaryShownAt - 6) / 3 + 1, 0, order.size());
             while (summaryTilesSounded < shown) {
-                int tier = wins.get(summaryTilesSounded).tier();
-                play(SoundEvents.NOTE_BLOCK_PLING, 0.9F + tier * 0.15F, 0.5F);
+                int index = order.get(summaryTilesSounded);
+                Draw d = round.draws.get(index);
+                if (!d.won()) {
+                    play(SoundEvents.UI_BUTTON_CLICK, 1.6F, 0.2F);
+                } else {
+                    play(SoundEvents.NOTE_BLOCK_PLING, 0.9F + d.tier() * 0.15F, 0.5F);
+                    if (d.tier() >= 4) play(SoundEvents.AMETHYST_BLOCK_CHIME, 1.0F, 1.0F);
+                    if (source.isNew(index)) play(SoundEvents.EXPERIENCE_ORB_PICKUP, 1.4F, 0.4F);
+                }
                 summaryTilesSounded++;
             }
         }

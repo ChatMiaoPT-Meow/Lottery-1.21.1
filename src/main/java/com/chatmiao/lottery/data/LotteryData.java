@@ -39,6 +39,15 @@ public final class LotteryData extends SavedData {
     private final Map<UUID, java.util.ArrayDeque<PullRecord>> history = new HashMap<>();
     public static final int HISTORY_LIMIT = 100;
     private int nextHubRoundId = 1;
+    /** Item ids each player has ever pulled from a gacha pool (for the "NEW" badge). */
+    private final Map<UUID, java.util.Set<String>> collection = new HashMap<>();
+
+    /** Records that {@code player} got {@code itemKey}. @return true if this is the first time */
+    public boolean markObtained(UUID player, String itemKey) {
+        boolean fresh = collection.computeIfAbsent(player, k -> new java.util.HashSet<>()).add(itemKey);
+        if (fresh) setDirty();
+        return fresh;
+    }
 
     // ---------------- vouchers ----------------
 
@@ -230,6 +239,13 @@ public final class LotteryData extends SavedData {
             for (Tag r : h.getList("records", Tag.TAG_COMPOUND)) list.addLast(PullRecord.load((CompoundTag) r, provider));
             data.history.put(h.getUUID("player"), list);
         }
+        for (Tag t : tag.getList("collection", Tag.TAG_COMPOUND)) {
+            CompoundTag c = (CompoundTag) t;
+            if (!c.hasUUID("player")) continue;
+            java.util.Set<String> set = new java.util.HashSet<>();
+            for (Tag s : c.getList("items", Tag.TAG_STRING)) set.add(s.getAsString());
+            data.collection.put(c.getUUID("player"), set);
+        }
         TicketNames.replaceAll(data.typeNames());
         VoucherNames.replaceAll(data.voucherInfo());
         return data;
@@ -278,6 +294,16 @@ public final class LotteryData extends SavedData {
             historyList.add(h);
         }
         tag.put("history", historyList);
+        ListTag collectionList = new ListTag();
+        for (Map.Entry<UUID, java.util.Set<String>> e : collection.entrySet()) {
+            CompoundTag c = new CompoundTag();
+            c.putUUID("player", e.getKey());
+            ListTag items = new ListTag();
+            for (String s : e.getValue()) items.add(net.minecraft.nbt.StringTag.valueOf(s));
+            c.put("items", items);
+            collectionList.add(c);
+        }
+        tag.put("collection", collectionList);
         return tag;
     }
 }

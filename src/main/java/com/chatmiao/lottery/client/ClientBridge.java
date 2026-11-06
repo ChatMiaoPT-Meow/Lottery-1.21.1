@@ -58,7 +58,10 @@ public final class ClientBridge {
 
     public static void hubState(Payloads.HubState p) {
         Minecraft mc = Minecraft.getInstance();
-        if (mc.screen instanceof PlayScreen screen && screen.accepts(p)) {
+        if (p.round().revealedMask == 0) {
+            // a fresh pull (or one closed before anything was revealed): play the summon first
+            mc.setScreen(new SummonScreen(p));
+        } else if (mc.screen instanceof PlayScreen screen && screen.accepts(p)) {
             screen.setState(p);
         } else {
             mc.setScreen(PlayScreen.create(p));
